@@ -136,6 +136,8 @@ fun MetricCard(
     }
 }
 
+private val LEND_ID_REGEX = Regex("""#(LEND[-_ ]*\d+)""", RegexOption.IGNORE_CASE)
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TransactionItemCard(
@@ -174,7 +176,6 @@ fun TransactionItemCard(
         else -> Icons.Default.Receipt
     }
 
-    val isFloating = LocalFloatingEffectEnabled.current
     val context = LocalContext.current
 
     Card(
@@ -203,7 +204,7 @@ fun TransactionItemCard(
             width = if (isSelected) 2.dp else 1.dp,
             color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (isFloating) 2.dp else 0.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Row(
             modifier = Modifier
@@ -234,12 +235,12 @@ fun TransactionItemCard(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.Center
             ) {
-                val displayTitle = remember(transaction) {
+                val displayTitle = remember(transaction.id, transaction.transactionType, transaction.categoryName, transaction.description) {
                     if (transaction.transactionType == TransactionType.LENDING || transaction.categoryName.equals("Lend", ignoreCase = true) || transaction.categoryName.equals("Loans Given", ignoreCase = true)) {
                         val explicitId = transaction.advanceId?.takeIf { it.startsWith("LEND", ignoreCase = true) }
                             ?: transaction.linkedLoanId?.let { "LEND-$it" }
-                            ?: Regex("""#(LEND[-_ ]*\d+)""", RegexOption.IGNORE_CASE).find(transaction.notes)?.groupValues?.get(1)
-                            ?: Regex("""#(LEND[-_ ]*\d+)""", RegexOption.IGNORE_CASE).find(transaction.description)?.groupValues?.get(1)
+                            ?: LEND_ID_REGEX.find(transaction.notes)?.groupValues?.get(1)
+                            ?: LEND_ID_REGEX.find(transaction.description)?.groupValues?.get(1)
                         if (!explicitId.isNullOrBlank()) {
                             val clean = explicitId.uppercase().replace(Regex("[_ ]"), "-")
                             if (clean.startsWith("#")) clean else "#$clean"

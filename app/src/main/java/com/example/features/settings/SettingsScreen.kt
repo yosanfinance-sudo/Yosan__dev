@@ -48,6 +48,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import com.example.utils.adaptiveScrollRate
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -348,6 +349,7 @@ fun SettingsScreen(
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
+            .adaptiveScrollRate()
             .testTag("more_screen"),
         contentPadding = PaddingValues(bottom = 100.dp)
     ) {
@@ -647,7 +649,7 @@ fun SettingsScreen(
                 ) {
                     AppleSettingsRow(
                         title = "Gemini API Key",
-                        subtitle = if (currentGeminiKey.isNotBlank()) "Configured • AI Financial Assistant is active" else "Not configured • Tap to enter your Google Gemini API key",
+                        subtitle = if (currentGeminiKey.isNotBlank()) "Configured • Assistant active" else "Tap to set up your API key",
                         icon = Icons.Default.AutoAwesome,
                         iconBgColor = MaterialTheme.colorScheme.primaryContainer,
                         valueText = if (currentGeminiKey.isNotBlank()) "Active" else "Setup",
@@ -661,10 +663,13 @@ fun SettingsScreen(
                 val appPrefs = remember { com.example.utils.AppPreferences(context) }
                 val currentEmail = userProfile?.email ?: authUser?.email ?: appPrefs.lastUserEmail
                 val currentKeyword = appPrefs.getOfficialExpenseKeywordForUser(currentEmail).ifBlank { appPrefs.officialExpenseKeyword.ifBlank { "Company" } }
-                AppleSettingsGroup(title = "Official Expenses") {
+                AppleSettingsGroup(
+                    title = "Official Expenses",
+                    footer = "Transactions matching this keyword are flagged for reimbursement claims."
+                ) {
                     AppleSettingsRow(
                         title = "Official Expense Keyword",
-                        subtitle = "Keyword assigned to scan & identify official claimable expenses",
+                        subtitle = "Scan & tag official company claims",
                         icon = Icons.Default.Work,
                         iconBgColor = MaterialTheme.colorScheme.surfaceVariant,
                         valueText = currentKeyword,
@@ -946,6 +951,127 @@ fun SettingsScreen(
                             )
                         }
                     )
+
+                    AppleDivider()
+
+                    // Display Refresh Rate Segment Selector
+                    val refreshRateMode by viewModel.refreshRateMode.collectAsState()
+                    val displayCaps by com.example.utils.AdaptiveRefreshRateManager.capabilities.collectAsState()
+                    val peakHz = displayCaps.peakRefreshRate.toInt()
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Speed,
+                                            contentDescription = "Refresh Rate",
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(17.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(14.dp))
+                                Column {
+                                    Text(
+                                        text = "Display Refresh Rate",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = if (displayCaps.isHighRefreshRateSupported) {
+                                            when (refreshRateMode) {
+                                                "HIGH" -> "Locked at ${peakHz}Hz for maximum fluidity"
+                                                "STANDARD" -> "Locked at 60Hz to conserve battery"
+                                                else -> "Adaptive: 60Hz static • 90Hz scrolling • ${peakHz}Hz nav"
+                                            }
+                                        } else {
+                                            "Standard 60Hz (Hardware default)"
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+
+                        if (displayCaps.isHighRefreshRateSupported) {
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Apple iOS-Style 3-Segment Control (Adaptive, High, 60Hz)
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(9.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(36.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(2.dp)
+                                ) {
+                                    listOf(
+                                        "ADAPTIVE" to "Adaptive",
+                                        "HIGH" to "High (${peakHz}Hz)",
+                                        "STANDARD" to "60Hz"
+                                    ).forEach { (mode, label) ->
+                                        val isSelected = refreshRateMode == mode
+                                        Surface(
+                                            color = if (isSelected) MaterialTheme.colorScheme.surface else Color.Transparent,
+                                            shape = RoundedCornerShape(7.dp),
+                                            shadowElevation = if (isSelected) 2.dp else 0.dp,
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .fillMaxHeight()
+                                                .clip(RoundedCornerShape(7.dp))
+                                                .clickable {
+                                                    com.example.utils.HapticHelper.vibrateTick(context)
+                                                    viewModel.setRefreshRateMode(mode)
+                                                }
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Text(
+                                                    text = label,
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                                    color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = when (refreshRateMode) {
+                                    "HIGH" -> "Maintains ${peakHz}Hz continuously for ultra-smooth rendering everywhere."
+                                    "STANDARD" -> "Limits display to 60Hz to maximize battery longevity."
+                                    else -> "Accelerates to 90Hz during scrolling & touches, ramps to ${peakHz}Hz during navigation transitions, and relaxes to 60Hz when static."
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                                modifier = Modifier.padding(horizontal = 2.dp)
+                            )
+                        }
+                    }
+
+
                 }
             }
 
@@ -1424,6 +1550,8 @@ fun SettingsScreen(
         val rememberedAccounts by authViewModel?.rememberedAccounts?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
         var accountToRemoveInSettings by remember { mutableStateOf<com.example.utils.RememberedAccount?>(null) }
         val currentEmail = userProfile?.email ?: authUser?.email ?: ""
+        val biometricAuthManager = remember { BiometricAuthManager(context) }
+        val appPrefs = remember { AppPreferences(context) }
 
         AlertDialog(
             onDismissRequest = { showSwitchAccountDialog = false },
@@ -1464,23 +1592,50 @@ fun SettingsScreen(
                         } else {
                             currentEmail.isNotBlank() && acc.email.equals(currentEmail, ignoreCase = true)
                         }
+                        val isTargetBioEnabled = appPrefs.isBiometricEnabledForUser(acc.email)
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable(enabled = !isCurrent && switchingAccountName == null) {
                                     com.example.utils.HapticHelper.vibrateClick(context)
-                                    showSwitchAccountDialog = false
                                     val targetName = acc.name.ifBlank { acc.email.ifBlank { "User" } }
-                                    switchingAccountName = targetName
-                                    statusNotificationMsg = null
-                                    authViewModel?.switchAccount(acc.email) {
-                                        switchingAccountName = null
-                                        android.widget.Toast.makeText(
-                                            context,
-                                            "Switched to $targetName",
-                                            android.widget.Toast.LENGTH_SHORT
-                                        ).show()
-                                        onAccountSwitched()
+                                    val fragmentActivity = context.findFragmentActivity()
+
+                                    val performSwitch = {
+                                        showSwitchAccountDialog = false
+                                        switchingAccountName = targetName
+                                        statusNotificationMsg = null
+                                        authViewModel?.switchAccount(acc.email) {
+                                            switchingAccountName = null
+                                            android.widget.Toast.makeText(
+                                                context,
+                                                "Switched to $targetName",
+                                                android.widget.Toast.LENGTH_SHORT
+                                            ).show()
+                                            onAccountSwitched()
+                                        }
+                                    }
+
+                                    if (isTargetBioEnabled && biometricAuthManager.isBiometricAvailable() && fragmentActivity != null) {
+                                        biometricAuthManager.authenticateBiometric(
+                                            activity = fragmentActivity,
+                                            title = "Unlock $targetName",
+                                            subtitle = "Verify fingerprint or face to switch accounts",
+                                            onSuccess = {
+                                                performSwitch()
+                                            },
+                                            onError = { errorCode, errString ->
+                                                if (errorCode != androidx.biometric.BiometricPrompt.ERROR_USER_CANCELED &&
+                                                    errorCode != androidx.biometric.BiometricPrompt.ERROR_NEGATIVE_BUTTON) {
+                                                    android.widget.Toast.makeText(context, errString, android.widget.Toast.LENGTH_SHORT).show()
+                                                }
+                                            },
+                                            onFailed = {
+                                                android.widget.Toast.makeText(context, "Authentication failed. Account switch cancelled.", android.widget.Toast.LENGTH_SHORT).show()
+                                            }
+                                        )
+                                    } else {
+                                        performSwitch()
                                     }
                                 },
                             shape = RoundedCornerShape(12.dp),
@@ -1519,6 +1674,15 @@ fun SettingsScreen(
                                             style = MaterialTheme.typography.titleSmall,
                                             fontWeight = FontWeight.Bold
                                         )
+                                        if (isTargetBioEnabled) {
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Icon(
+                                                imageVector = Icons.Default.Fingerprint,
+                                                contentDescription = "Biometric Protected",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                        }
                                         if (isCurrent) {
                                             Spacer(modifier = Modifier.width(6.dp))
                                             Text(
@@ -3604,6 +3768,8 @@ fun AppleSettingsRow(
             }
         }
 
+        Spacer(modifier = Modifier.width(10.dp))
+
         if (trailing != null) {
             trailing()
         } else {
@@ -3612,7 +3778,9 @@ fun AppleSettingsRow(
                     text = valueText,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                    fontSize = 13.5.sp
+                    fontSize = 13.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.width(6.dp))
             }

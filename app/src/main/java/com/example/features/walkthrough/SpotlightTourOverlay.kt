@@ -59,7 +59,7 @@ enum class SpotlightStep(
     ),
     STATEMENTS_FILTER(
         3,
-        "Flipkart-Style Filter Drawer",
+        "Smart Filter Drawer",
         "Open the two-column filter drawer to filter by Category, Account, Transaction Type, and Custom Date Range with blue selection accents.",
         "Active filters dynamically update your passbook, monthly summary, and PDF export."
     ),

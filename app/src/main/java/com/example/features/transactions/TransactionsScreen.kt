@@ -1,5 +1,7 @@
 package com.example.features.transactions
 
+import com.example.utils.adaptiveScrollRate
+
 import com.example.features.walkthrough.SpotlightTourManager
 import com.example.features.walkthrough.SpotlightStep
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -616,22 +618,22 @@ fun TransactionsScreen(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.FilterList,
                         contentDescription = "Filters",
                         tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(15.dp)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(5.dp))
                     Text(
                         text = if (txActiveCount > 0) "Filters ($txActiveCount)" else "Filters",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    Spacer(modifier = Modifier.width(3.dp))
+                    Spacer(modifier = Modifier.width(2.dp))
                     Icon(
                         imageVector = Icons.Default.ArrowDropDown,
                         contentDescription = null,
@@ -877,6 +879,9 @@ fun TransactionsScreen(
         } else {
             val privacyEnabled = userProfile?.isPrivacyBlurEnabled ?: true
             val statementListState = androidx.compose.foundation.lazy.rememberLazyListState()
+            val onToggleReveal = remember(viewModel) { { viewModel.revealAmountsTemporarily() } }
+            val onDeleteTx = remember(viewModel) { { id: Long -> viewModel.deleteTransaction(id) } }
+
             LaunchedEffect(selectedTxIds.size) {
                 if (selectedTxIds.isNotEmpty()) {
                     statementListState.animateScrollToItem(0)
@@ -886,6 +891,7 @@ fun TransactionsScreen(
                 state = statementListState,
                 modifier = Modifier
                     .fillMaxSize()
+                    .adaptiveScrollRate()
                     .padding(horizontal = 16.dp),
                 contentPadding = PaddingValues(top = 8.dp, bottom = 100.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -894,7 +900,7 @@ fun TransactionsScreen(
                 if (isSelectionMode) {
                     val pinnedSelectedList = transactions.filter { selectedTxIds.contains(it.id) }
                     if (pinnedSelectedList.isNotEmpty()) {
-                        item(key = "pinned_selected_statement_header") {
+                        item(key = "pinned_selected_statement_header", contentType = "header") {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -916,19 +922,19 @@ fun TransactionsScreen(
                                 )
                             }
                         }
-                        items(pinnedSelectedList, key = { "pinned_${it.id}" }) { tx ->
+                        items(pinnedSelectedList, key = { "pinned_${it.id}" }, contentType = { "transaction_card" }) { tx ->
                             TransactionItemCard(
                                 transaction = tx,
                                 isSelected = true,
                                 isRevealed = isRevealed,
                                 isPrivacyEnabled = privacyEnabled,
-                                onToggleReveal = { viewModel.revealAmountsTemporarily() },
+                                onToggleReveal = onToggleReveal,
                                 onClick = { selectedTxIds.remove(tx.id) },
                                 onLongClick = { selectedTxIds.remove(tx.id) },
-                                onDelete = { viewModel.deleteTransaction(tx.id) }
+                                onDelete = { onDeleteTx(tx.id) }
                             )
                         }
-                        item(key = "pinned_selected_divider") {
+                        item(key = "pinned_selected_divider", contentType = "divider") {
                             HorizontalDivider(
                                 modifier = Modifier.padding(vertical = 6.dp),
                                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
@@ -940,7 +946,7 @@ fun TransactionsScreen(
                 groupedTransactions.forEach { (date, txList) ->
                     val unselectedTxList = if (isSelectionMode) txList.filter { !selectedTxIds.contains(it.id) } else txList
                     if (unselectedTxList.isNotEmpty()) {
-                        item(key = "header_$date") {
+                        item(key = "header_$date", contentType = "date_header") {
                             Text(
                                 text = DateUtils.formatForDisplay(date),
                                 style = MaterialTheme.typography.labelMedium,
@@ -949,14 +955,14 @@ fun TransactionsScreen(
                                 modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)
                             )
                         }
-                        items(unselectedTxList, key = { it.id }) { tx ->
+                        items(unselectedTxList, key = { it.id }, contentType = { "transaction_card" }) { tx ->
                             val isSelected = selectedTxIds.contains(tx.id)
                             TransactionItemCard(
                                 transaction = tx,
                                 isSelected = isSelected,
                                 isRevealed = isRevealed,
                                 isPrivacyEnabled = privacyEnabled,
-                                onToggleReveal = { viewModel.revealAmountsTemporarily() },
+                                onToggleReveal = onToggleReveal,
                                 onClick = {
                                     if (isSelectionMode) {
                                         if (isSelected) {
@@ -979,7 +985,7 @@ fun TransactionsScreen(
                                         }
                                     }
                                 },
-                                onDelete = { viewModel.deleteTransaction(tx.id) }
+                                onDelete = { onDeleteTx(tx.id) }
                             )
                         }
                     }
@@ -1011,11 +1017,11 @@ fun TransactionsScreen(
             modifier = Modifier.fillMaxHeight(0.70f)
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                // Header
+                // Header (Crisp Title + Count + Clear + Close)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -1092,7 +1098,7 @@ fun TransactionsScreen(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 14.dp),
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
@@ -1135,9 +1141,9 @@ fun TransactionsScreen(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight()
-                            .padding(12.dp)
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
                             .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         when (draftCategory) {
                             TxFlipkartFilterCategory.TYPE -> {
@@ -1162,7 +1168,7 @@ fun TransactionsScreen(
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(horizontal = 8.dp, vertical = 10.dp),
+                                                .padding(horizontal = 6.dp, vertical = 5.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             RadioButton(
@@ -1173,7 +1179,7 @@ fun TransactionsScreen(
                                                 },
                                                 colors = RadioButtonDefaults.colors(selectedColor = FilterSelectionBlue)
                                             )
-                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
                                             Text(
                                                 text = label,
                                                 style = MaterialTheme.typography.bodyMedium,
@@ -1200,7 +1206,7 @@ fun TransactionsScreen(
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                                            .padding(horizontal = 6.dp, vertical = 5.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         RadioButton(
@@ -1211,7 +1217,7 @@ fun TransactionsScreen(
                                             },
                                             colors = RadioButtonDefaults.colors(selectedColor = FilterSelectionBlue)
                                         )
-                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
                                         Text(
                                             text = "All Accounts",
                                             style = MaterialTheme.typography.bodyMedium,
@@ -1237,7 +1243,7 @@ fun TransactionsScreen(
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                                                .padding(horizontal = 6.dp, vertical = 5.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             RadioButton(
@@ -1248,7 +1254,7 @@ fun TransactionsScreen(
                                                 },
                                                 colors = RadioButtonDefaults.colors(selectedColor = FilterSelectionBlue)
                                             )
-                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
                                             Column {
                                                 Text(
                                                     text = acc.bankName,
@@ -1284,7 +1290,7 @@ fun TransactionsScreen(
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                                            .padding(horizontal = 6.dp, vertical = 5.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         RadioButton(
@@ -1295,12 +1301,48 @@ fun TransactionsScreen(
                                             },
                                             colors = RadioButtonDefaults.colors(selectedColor = FilterSelectionBlue)
                                         )
-                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
                                         Text(
                                             text = "All Categories",
                                             style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = if (isAllSelected) FontWeight.Bold else FontWeight.Normal,
                                             color = if (isAllSelected) FilterSelectionBlue else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+
+                                val isUncatSelected = draftCategoryName.equals("Uncategorized", ignoreCase = true)
+                                Surface(
+                                    color = if (isUncatSelected) FilterSelectionBlue.copy(alpha = 0.12f) else Color.Transparent,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            HapticHelper.vibrateTick(context)
+                                            draftCategoryName = "Uncategorized"
+                                        }
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 6.dp, vertical = 5.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        RadioButton(
+                                            selected = isUncatSelected,
+                                            onClick = {
+                                                HapticHelper.vibrateTick(context)
+                                                draftCategoryName = "Uncategorized"
+                                            },
+                                            colors = RadioButtonDefaults.colors(selectedColor = FilterSelectionBlue)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "Uncategorized",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = if (isUncatSelected) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isUncatSelected) FilterSelectionBlue else MaterialTheme.colorScheme.onSurface
                                         )
                                     }
                                 }
@@ -1321,7 +1363,7 @@ fun TransactionsScreen(
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                                                .padding(horizontal = 6.dp, vertical = 5.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             RadioButton(
@@ -1332,7 +1374,7 @@ fun TransactionsScreen(
                                                 },
                                                 colors = RadioButtonDefaults.colors(selectedColor = FilterSelectionBlue)
                                             )
-                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
                                             Text(
                                                 text = cat.name,
                                                 style = MaterialTheme.typography.bodyMedium,
@@ -1359,7 +1401,7 @@ fun TransactionsScreen(
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                                            .padding(horizontal = 6.dp, vertical = 5.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         RadioButton(
@@ -1370,7 +1412,7 @@ fun TransactionsScreen(
                                             },
                                             colors = RadioButtonDefaults.colors(selectedColor = FilterSelectionBlue)
                                         )
-                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
                                         Text(
                                             text = "All Months",
                                             style = MaterialTheme.typography.bodyMedium,
@@ -1399,7 +1441,7 @@ fun TransactionsScreen(
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                                                .padding(horizontal = 6.dp, vertical = 5.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             RadioButton(
@@ -1410,7 +1452,7 @@ fun TransactionsScreen(
                                                 },
                                                 colors = RadioButtonDefaults.colors(selectedColor = FilterSelectionBlue)
                                             )
-                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
                                             Text(
                                                 text = mStr,
                                                 style = MaterialTheme.typography.bodyMedium,
@@ -1431,7 +1473,7 @@ fun TransactionsScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp),
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     OutlinedButton(

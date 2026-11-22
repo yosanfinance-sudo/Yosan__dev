@@ -1,5 +1,7 @@
 package com.example.features.dashboard
 
+import com.example.utils.adaptiveScrollRate
+
 import com.example.features.walkthrough.SpotlightTourManager
 import com.example.features.walkthrough.SpotlightStep
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -87,6 +89,7 @@ fun DashboardScreen(
     }
 
     val summary by viewModel.dashboardSummary.collectAsState()
+    val accountsList by viewModel.accounts.collectAsState()
     val allTransactions by viewModel.allTransactions.collectAsState()
     val isDataLoaded by viewModel.isDataLoaded.collectAsState()
     val loans by viewModel.loans.collectAsState()
@@ -95,6 +98,10 @@ fun DashboardScreen(
     val monthlyTrends by viewModel.monthlyTrends.collectAsState()
     val insights by viewModel.financialInsights.collectAsState()
     val userProfile by viewModel.userProfile.collectAsState()
+    val isGeminiConfigured = remember(userProfile) {
+        val email = userProfile?.email
+        appPreferences.getGeminiApiKeyForUser(email).isNotBlank() || appPreferences.geminiApiKey.isNotBlank()
+    }
     val companyExpenses by viewModel.companyExpenses.collectAsState()
     val isRevealed by viewModel.isAmountTemporarilyRevealed.collectAsState()
     val privacyEnabled = userProfile?.isPrivacyBlurEnabled ?: true
@@ -135,6 +142,7 @@ fun DashboardScreen(
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
+            .adaptiveScrollRate()
             .testTag("dashboard_screen"),
         contentPadding = PaddingValues(bottom = 100.dp)
     ) {
@@ -170,16 +178,18 @@ fun DashboardScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        FilledTonalIconButton(
-                            onClick = onOpenAiChat,
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.AutoAwesome,
-                                contentDescription = "AI Financial Assistant",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
+                        if (isGeminiConfigured) {
+                            FilledTonalIconButton(
+                                onClick = onOpenAiChat,
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = "AI Financial Assistant",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
 
                         IconButton(
@@ -203,8 +213,7 @@ fun DashboardScreen(
         }
 
         // Account-wise Balance Section (Positioned at the very top of Dashboard)
-        item(key = "account_wise_balance_section") {
-            val accountsList by viewModel.accounts.collectAsState()
+        item(key = "account_wise_balance_section", contentType = "account_balance") {
             val totalAccountsBalance = remember(accountsList) {
                 accountsList.sumOf { it.currentBalance }
             }
@@ -373,10 +382,9 @@ fun DashboardScreen(
                     when (cardItem.type) {
                         // Hand Cash Card
                         DashboardCardType.HAND_CASH -> {
-                            item {
-                                val accounts by viewModel.accounts.collectAsState()
-                                val cashAccount = remember(accounts) {
-                                    accounts.firstOrNull { it.accountType == com.example.data.local.entity.AccountType.CASH }
+                            item(key = "card_${cardItem.type.id}", contentType = "dashboard_card") {
+                                val cashAccount = remember(accountsList) {
+                                    accountsList.firstOrNull { it.accountType == com.example.data.local.entity.AccountType.CASH }
                                 }
                                 val cashTxs = remember(allTransactions, cashAccount) {
                                     allTransactions.filter { tx -> viewModel.isCashTransaction(tx) }

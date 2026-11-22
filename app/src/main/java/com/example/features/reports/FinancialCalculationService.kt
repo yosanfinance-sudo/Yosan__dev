@@ -405,22 +405,34 @@ object FinancialCalculationService {
             "#EC4899", "#F97316", "#06B6D4", "#64748B", "#84CC16"
         )
 
-        return expenseTransactions
-            .groupBy { it.categoryName }
-            .map { (catName, txs) ->
-                val amount = txs.sumOf { if (it.debitAmount > 0) it.debitAmount else it.amount }
-                val percentage = if (totalExpense > 0) ((amount / totalExpense) * 100).toFloat() else 0f
-                val color = categoryColorMap[catName.lowercase()]
-                    ?: palette[Math.floorMod(catName.hashCode(), palette.size)]
-                CategoryExpenseItem(
-                    categoryName = catName,
-                    amount = amount,
-                    percentage = percentage,
-                    colorHex = color,
-                    count = txs.size
-                )
+        val categoryAmounts = mutableMapOf<String, Double>()
+        val categoryCounts = mutableMapOf<String, Int>()
+
+        for (tx in expenseTransactions) {
+            val amount = if (tx.debitAmount > 0) tx.debitAmount else tx.amount
+            val rawCategories = tx.categoryName.split(",")
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+            val categories = if (rawCategories.isNotEmpty()) rawCategories else listOf("Uncategorized")
+            val splitAmount = amount / categories.size
+            for (cat in categories) {
+                categoryAmounts[cat] = (categoryAmounts[cat] ?: 0.0) + splitAmount
+                categoryCounts[cat] = (categoryCounts[cat] ?: 0) + 1
             }
-            .sortedByDescending { it.amount }
+        }
+
+        return categoryAmounts.map { (catName, amount) ->
+            val percentage = if (totalExpense > 0) ((amount / totalExpense) * 100).toFloat() else 0f
+            val color = categoryColorMap[catName.lowercase()]
+                ?: palette[Math.floorMod(catName.hashCode(), palette.size)]
+            CategoryExpenseItem(
+                categoryName = catName,
+                amount = amount,
+                percentage = percentage,
+                colorHex = color,
+                count = categoryCounts[catName] ?: 0
+            )
+        }.sortedByDescending { it.amount }
     }
 
     fun calculateCategoryIncomeBreakdown(
@@ -437,22 +449,34 @@ object FinancialCalculationService {
             "#8B5CF6", "#06B6D4", "#14B8A6", "#84CC16", "#F59E0B"
         )
 
-        return incomeTransactions
-            .groupBy { it.categoryName }
-            .map { (catName, txs) ->
-                val amount = txs.sumOf { if (it.creditAmount > 0) it.creditAmount else it.amount }
-                val percentage = if (totalIncome > 0) ((amount / totalIncome) * 100).toFloat() else 0f
-                val color = categoryColorMap[catName.lowercase()]
-                    ?: incomePalette[Math.floorMod(catName.hashCode(), incomePalette.size)]
-                CategoryExpenseItem(
-                    categoryName = catName,
-                    amount = amount,
-                    percentage = percentage,
-                    colorHex = color,
-                    count = txs.size
-                )
+        val categoryAmounts = mutableMapOf<String, Double>()
+        val categoryCounts = mutableMapOf<String, Int>()
+
+        for (tx in incomeTransactions) {
+            val amount = if (tx.creditAmount > 0) tx.creditAmount else tx.amount
+            val rawCategories = tx.categoryName.split(",")
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+            val categories = if (rawCategories.isNotEmpty()) rawCategories else listOf("Uncategorized")
+            val splitAmount = amount / categories.size
+            for (cat in categories) {
+                categoryAmounts[cat] = (categoryAmounts[cat] ?: 0.0) + splitAmount
+                categoryCounts[cat] = (categoryCounts[cat] ?: 0) + 1
             }
-            .sortedByDescending { it.amount }
+        }
+
+        return categoryAmounts.map { (catName, amount) ->
+            val percentage = if (totalIncome > 0) ((amount / totalIncome) * 100).toFloat() else 0f
+            val color = categoryColorMap[catName.lowercase()]
+                ?: incomePalette[Math.floorMod(catName.hashCode(), incomePalette.size)]
+            CategoryExpenseItem(
+                categoryName = catName,
+                amount = amount,
+                percentage = percentage,
+                colorHex = color,
+                count = categoryCounts[catName] ?: 0
+            )
+        }.sortedByDescending { it.amount }
     }
 
     fun calculateMonthlyTrends(transactions: List<TransactionEntity>): List<MonthlyTrendItem> {

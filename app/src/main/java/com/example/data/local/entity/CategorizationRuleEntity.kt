@@ -1,5 +1,6 @@
 package com.example.data.local.entity
 
+import androidx.compose.runtime.Immutable
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -7,6 +8,7 @@ enum class MatchType {
     CONTAINS, EXACT, STARTS_WITH, ENDS_WITH, REGEX
 }
 
+@Immutable
 @Entity(tableName = "categorization_rules")
 data class CategorizationRuleEntity(
     @PrimaryKey(autoGenerate = true)

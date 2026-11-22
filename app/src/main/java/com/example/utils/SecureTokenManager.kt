@@ -626,6 +626,32 @@ class SecureTokenManager(context: Context) {
 
     fun getBackupPassphrase(): String? = sharedPreferences.getString(KEY_BACKUP_PASSPHRASE, null)
 
+    fun saveBackupPassphraseForUser(userEmail: String?, passphrase: String?) {
+        val userKey = if (userEmail.isNullOrBlank() || userEmail.equals("guest", ignoreCase = true) || userEmail.equals("offline", ignoreCase = true)) {
+            "guest"
+        } else {
+            com.example.data.local.AppDatabase.sanitizeUserKey(userEmail)
+        }
+        val key = "${KEY_BACKUP_PASSPHRASE}_$userKey"
+        val editor = sharedPreferences.edit()
+        if (passphrase.isNullOrBlank()) {
+            editor.remove(key)
+        } else {
+            editor.putString(key, passphrase)
+        }
+        editor.apply()
+    }
+
+    fun getBackupPassphraseForUser(userEmail: String?): String? {
+        val userKey = if (userEmail.isNullOrBlank() || userEmail.equals("guest", ignoreCase = true) || userEmail.equals("offline", ignoreCase = true)) {
+            "guest"
+        } else {
+            com.example.data.local.AppDatabase.sanitizeUserKey(userEmail)
+        }
+        val key = "${KEY_BACKUP_PASSPHRASE}_$userKey"
+        return sharedPreferences.getString(key, null) ?: getBackupPassphrase()
+    }
+
     fun saveOAuthStateNonce(nonce: String) {
         sharedPreferences.edit().putString(KEY_OAUTH_STATE_NONCE, nonce).apply()
     }

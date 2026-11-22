@@ -72,6 +72,13 @@ fun AddTransactionSheet(
             ?: accounts.firstOrNull()
     }
 
+    val userProfile by viewModel.userProfile.collectAsState()
+    val appPrefs = remember { com.example.utils.AppPreferences(context) }
+    val isGeminiConfigured = remember(userProfile) {
+        val email = userProfile?.email
+        appPrefs.getGeminiApiKeyForUser(email).isNotBlank() || appPrefs.geminiApiKey.isNotBlank()
+    }
+
     val draft = viewModel.addTransactionDraft
     var isSaved by remember { mutableStateOf(false) }
 
@@ -296,75 +303,77 @@ fun AddTransactionSheet(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Quick Voice / Natural Language Typing Field (identical to Widget)
-            OutlinedTextField(
-                value = rawVoiceInput,
-                onValueChange = { newText ->
-                    rawVoiceInput = newText
-                    val parsed = QuickCashParser.parse(newText)
-                    if (parsed.amount > 0.0) {
-                        amountText = if (parsed.amount % 1.0 == 0.0) {
-                            parsed.amount.toLong().toString()
-                        } else {
-                            String.format(java.util.Locale.getDefault(), "%.2f", parsed.amount)
+            // Quick Voice / Natural Language Typing Field (Enabled only when Gemini API key is configured)
+            if (isGeminiConfigured) {
+                OutlinedTextField(
+                    value = rawVoiceInput,
+                    onValueChange = { newText ->
+                        rawVoiceInput = newText
+                        val parsed = QuickCashParser.parse(newText)
+                        if (parsed.amount > 0.0) {
+                            amountText = if (parsed.amount % 1.0 == 0.0) {
+                                parsed.amount.toLong().toString()
+                            } else {
+                                String.format(java.util.Locale.getDefault(), "%.2f", parsed.amount)
+                            }
                         }
-                    }
-                    if (parsed.note.isNotBlank()) {
-                        description = parsed.note
-                    }
-                    val matched = QuickCashParser.matchCategory(parsed.suggestedCategoryName, categories)
-                    if (matched != null) {
-                        selectedCategory = matched
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                placeholder = {
-                    Text(
-                        text = "Say or type: e.g. 50 tea or 200 on petrol",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        fontSize = 13.sp
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.AutoAwesome,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                },
-                trailingIcon = {
-                    IconButton(
-                        onClick = {
-                            HapticHelper.vibrateClick(context)
-                            launchVoiceRecognition()
+                        if (parsed.note.isNotBlank()) {
+                            description = parsed.note
                         }
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primary),
-                            contentAlignment = Alignment.Center
+                        val matched = QuickCashParser.matchCategory(parsed.suggestedCategoryName, categories)
+                        if (matched != null) {
+                            selectedCategory = matched
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    placeholder = {
+                        Text(
+                            text = "Say or type: e.g. 50 tea or 200 on petrol",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            fontSize = 13.sp
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    },
+                    trailingIcon = {
+                        IconButton(
+                            onClick = {
+                                HapticHelper.vibrateClick(context)
+                                launchVoiceRecognition()
+                            }
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Mic,
-                                contentDescription = "Speak",
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Mic,
+                                    contentDescription = "Speak",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
-                    }
-                },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
-                ),
-                singleLine = true
-            )
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+                    ),
+                    singleLine = true
+                )
 
-            Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(14.dp))
+            }
 
             // Amount Input
             OutlinedTextField(

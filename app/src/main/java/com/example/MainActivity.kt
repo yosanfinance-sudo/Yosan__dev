@@ -27,6 +27,7 @@ import androidx.compose.animation.core.tween
 import com.example.ui.screens.LaunchAnimationScreen
 import androidx.compose.runtime.saveable.rememberSaveable
 import com.example.utils.AppPreferences
+import com.example.utils.SecureTokenManager
 import com.example.data.remote.ApiClient
 
 private enum class RootScreenState {
@@ -52,6 +53,9 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        // Adaptive Display Refresh Rate Engine (120Hz scroll/nav, 60Hz idle, battery saver aware)
+        com.example.utils.AdaptiveRefreshRateManager.init(this)
+
         // Silently wake up Render backend in background if cold-started
         ApiClient.prewarmBackend(applicationContext)
 
@@ -60,6 +64,7 @@ class MainActivity : FragmentActivity() {
         com.example.features.updater.UpdateCheckJobService.scheduleAlarmCheck(applicationContext)
 
         val appPreferences = AppPreferences(applicationContext)
+        val tokenManager = SecureTokenManager(applicationContext)
         val biometricAuthManager = BiometricAuthManager(applicationContext)
 
         setContent {
@@ -70,9 +75,20 @@ class MainActivity : FragmentActivity() {
             val authUser by authViewModel.user.collectAsState()
             val isAuthenticated = authState is AuthState.Authenticated
 
+            val preloadedEmail = remember {
+                val email = tokenManager.getUserEmail()?.trim()?.lowercase()
+                val isExplicitlyLoggedOut = if (!email.isNullOrBlank()) {
+                    appPreferences.isLoggedOutForUser(email)
+                } else {
+                    appPreferences.isLoggedOut
+                }
+                if (!isExplicitlyLoggedOut && !email.isNullOrBlank()) email else null
+            }
+
             // Multi-user Database Partition Key: Each user/guest has their own isolated ViewModel & Room DB
-            val currentEmail = authUser?.email?.trim()?.lowercase()
-            val activeUserKey = if (isAuthenticated && !currentEmail.isNullOrBlank()) {
+            val currentEmail = authUser?.email?.trim()?.lowercase() ?: preloadedEmail
+            val isUserAuthenticated = isAuthenticated || (preloadedEmail != null && authState !is AuthState.Unauthenticated)
+            val activeUserKey = if (isUserAuthenticated && !currentEmail.isNullOrBlank() && !appPreferences.isLoggedOutForUser(currentEmail)) {
                 com.example.data.local.AppDatabase.sanitizeUserKey(currentEmail)
             } else {
                 "guest"
@@ -82,6 +98,11 @@ class MainActivity : FragmentActivity() {
             com.example.data.local.AppDatabase.setActiveUserKey(activeUserKey)
 
             val financeViewModel: FinanceViewModel = viewModel(key = "finance_vm_$activeUserKey")
+
+            // Keep Adaptive Refresh Rate preference synced with active user profile
+            LaunchedEffect(currentEmail) {
+                com.example.utils.AdaptiveRefreshRateManager.loadUserPreference(applicationContext, currentEmail)
+            }
 
             // Check if activity was launched with an OAuth deep link intent
             LaunchedEffect(intent?.data) {
@@ -107,10 +128,11 @@ class MainActivity : FragmentActivity() {
             // Keep AppPreferences synchronized with Room UserProfile updates
             LaunchedEffect(userProfile, activeUserKey) {
                 userProfile?.let { profile ->
-                    if (profile.isOnboardingCompleted && !appPreferences.isLoggedOutForUser(currentEmail)) {
-                        appPreferences.setOnboardingCompletedForUser(currentEmail, true)
+                    val effectiveEmail = profile.email.ifBlank { currentEmail }
+                    if (profile.isOnboardingCompleted && !appPreferences.isLoggedOutForUser(effectiveEmail)) {
+                        appPreferences.setOnboardingCompletedForUser(effectiveEmail, true)
                     }
-                    appPreferences.setBiometricEnabledForUser(currentEmail, profile.isBiometricEnabled)
+                    appPreferences.setBiometricEnabledForUser(effectiveEmail, profile.isBiometricEnabled)
                 }
             }
 
@@ -328,8 +350,8 @@ class MainActivity : FragmentActivity() {
 
                     val targetScreen = when {
                         isSplashActive -> RootScreenState.SPLASH
-                        isAppLocked && isBiometricEnabled && isAuthenticated -> RootScreenState.LOCKED
-                        isAuthenticated && isUserOnboardingDone -> RootScreenState.MAIN
+                        isAppLocked && isBiometricEnabled && isUserAuthenticated -> RootScreenState.LOCKED
+                        isUserAuthenticated && isUserOnboardingDone -> RootScreenState.MAIN
                         else -> RootScreenState.ONBOARDING_LOGIN
                     }
 
@@ -394,5 +416,10 @@ class MainActivity : FragmentActivity() {
                 }
             }
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        com.example.utils.AdaptiveRefreshRateManager.destroy()
     }
 }

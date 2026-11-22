@@ -63,6 +63,38 @@ class AppPreferences(private val context: Context) {
             }
         }
 
+    fun isDarkModeForUser(userEmail: String?): Boolean? {
+        val userKey = if (userEmail.isNullOrBlank() || userEmail.equals("guest", ignoreCase = true) || userEmail.equals("offline", ignoreCase = true)) {
+            "guest"
+        } else {
+            com.example.data.local.AppDatabase.sanitizeUserKey(userEmail)
+        }
+        val perUserKey = "${KEY_DARK_MODE}_$userKey"
+        return if (prefs.contains(perUserKey)) {
+            prefs.getBoolean(perUserKey, false)
+        } else {
+            isDarkMode
+        }
+    }
+
+    fun setDarkModeForUser(userEmail: String?, isDark: Boolean?) {
+        val userKey = if (userEmail.isNullOrBlank() || userEmail.equals("guest", ignoreCase = true) || userEmail.equals("offline", ignoreCase = true)) {
+            "guest"
+        } else {
+            com.example.data.local.AppDatabase.sanitizeUserKey(userEmail)
+        }
+        val perUserKey = "${KEY_DARK_MODE}_$userKey"
+        val editor = prefs.edit()
+        if (isDark != null) {
+            editor.putBoolean(perUserKey, isDark)
+            editor.putBoolean(KEY_DARK_MODE, isDark)
+        } else {
+            editor.remove(perUserKey)
+            editor.remove(KEY_DARK_MODE)
+        }
+        editor.apply()
+    }
+
     var isBiometricEnabled: Boolean
         get() = prefs.getBoolean(KEY_BIOMETRIC_ENABLED, false)
         set(value) = prefs.edit().putBoolean(KEY_BIOMETRIC_ENABLED, value).apply()
@@ -129,13 +161,91 @@ class AppPreferences(private val context: Context) {
         get() = prefs.getBoolean(KEY_PRODUCT_TOUR_COMPLETED, false)
         set(value) = prefs.edit().putBoolean(KEY_PRODUCT_TOUR_COMPLETED, value).apply()
 
+    fun isProductTourCompletedForUser(userEmail: String?): Boolean {
+        val userKey = if (userEmail.isNullOrBlank() || userEmail.equals("guest", ignoreCase = true) || userEmail.equals("offline", ignoreCase = true)) {
+            "guest"
+        } else {
+            com.example.data.local.AppDatabase.sanitizeUserKey(userEmail)
+        }
+        val perUserKey = "${KEY_PRODUCT_TOUR_COMPLETED}_$userKey"
+        return if (prefs.contains(perUserKey)) {
+            prefs.getBoolean(perUserKey, false)
+        } else {
+            isProductTourCompleted
+        }
+    }
+
+    fun setProductTourCompletedForUser(userEmail: String?, completed: Boolean) {
+        val userKey = if (userEmail.isNullOrBlank() || userEmail.equals("guest", ignoreCase = true) || userEmail.equals("offline", ignoreCase = true)) {
+            "guest"
+        } else {
+            com.example.data.local.AppDatabase.sanitizeUserKey(userEmail)
+        }
+        prefs.edit()
+            .putBoolean("${KEY_PRODUCT_TOUR_COMPLETED}_$userKey", completed)
+            .putBoolean(KEY_PRODUCT_TOUR_COMPLETED, completed)
+            .apply()
+    }
+
     var isIntroNoteDismissed: Boolean
         get() = prefs.getBoolean(KEY_INTRO_NOTE_DISMISSED, false)
         set(value) = prefs.edit().putBoolean(KEY_INTRO_NOTE_DISMISSED, value).apply()
 
+    fun isIntroNoteDismissedForUser(userEmail: String?): Boolean {
+        val userKey = if (userEmail.isNullOrBlank() || userEmail.equals("guest", ignoreCase = true) || userEmail.equals("offline", ignoreCase = true)) {
+            "guest"
+        } else {
+            com.example.data.local.AppDatabase.sanitizeUserKey(userEmail)
+        }
+        val perUserKey = "${KEY_INTRO_NOTE_DISMISSED}_$userKey"
+        return if (prefs.contains(perUserKey)) {
+            prefs.getBoolean(perUserKey, false)
+        } else {
+            isIntroNoteDismissed
+        }
+    }
+
+    fun setIntroNoteDismissedForUser(userEmail: String?, dismissed: Boolean) {
+        val userKey = if (userEmail.isNullOrBlank() || userEmail.equals("guest", ignoreCase = true) || userEmail.equals("offline", ignoreCase = true)) {
+            "guest"
+        } else {
+            com.example.data.local.AppDatabase.sanitizeUserKey(userEmail)
+        }
+        prefs.edit()
+            .putBoolean("${KEY_INTRO_NOTE_DISMISSED}_$userKey", dismissed)
+            .putBoolean(KEY_INTRO_NOTE_DISMISSED, dismissed)
+            .apply()
+    }
+
     var isWalkthroughCompleted: Boolean
         get() = prefs.getBoolean(KEY_WALKTHROUGH_COMPLETED, false)
         set(value) = prefs.edit().putBoolean(KEY_WALKTHROUGH_COMPLETED, value).apply()
+
+    fun isWalkthroughCompletedForUser(userEmail: String?): Boolean {
+        val userKey = if (userEmail.isNullOrBlank() || userEmail.equals("guest", ignoreCase = true) || userEmail.equals("offline", ignoreCase = true)) {
+            "guest"
+        } else {
+            com.example.data.local.AppDatabase.sanitizeUserKey(userEmail)
+        }
+        val perUserKey = "${KEY_WALKTHROUGH_COMPLETED}_$userKey"
+        return if (prefs.contains(perUserKey)) {
+            prefs.getBoolean(perUserKey, false)
+        } else {
+            isWalkthroughCompleted
+        }
+    }
+
+    fun setWalkthroughCompletedForUser(userEmail: String?, completed: Boolean) {
+        val userKey = if (userEmail.isNullOrBlank() || userEmail.equals("guest", ignoreCase = true) || userEmail.equals("offline", ignoreCase = true)) {
+            "guest"
+        } else {
+            com.example.data.local.AppDatabase.sanitizeUserKey(userEmail)
+        }
+        prefs.edit()
+            .putBoolean("${KEY_WALKTHROUGH_COMPLETED}_$userKey", completed)
+            .putBoolean(KEY_WALKTHROUGH_COMPLETED, completed)
+            .apply()
+    }
 
     var isAutoCheckUpdatesEnabled: Boolean
         get() = prefs.getBoolean(KEY_AUTO_CHECK_UPDATES, true)
@@ -149,13 +259,122 @@ class AppPreferences(private val context: Context) {
         get() = prefs.getBoolean(KEY_BACKUP_ENCRYPTION_ENABLED, false)
         set(value) = prefs.edit().putBoolean(KEY_BACKUP_ENCRYPTION_ENABLED, value).apply()
 
+    fun isBackupEncryptionEnabledForUser(userEmail: String?): Boolean {
+        val userKey = if (userEmail.isNullOrBlank() || userEmail.equals("guest", ignoreCase = true) || userEmail.equals("offline", ignoreCase = true)) {
+            "guest"
+        } else {
+            com.example.data.local.AppDatabase.sanitizeUserKey(userEmail)
+        }
+        val perUserKey = "${KEY_BACKUP_ENCRYPTION_ENABLED}_$userKey"
+        return if (prefs.contains(perUserKey)) {
+            prefs.getBoolean(perUserKey, false)
+        } else {
+            isBackupEncryptionEnabled
+        }
+    }
+
+    fun setBackupEncryptionEnabledForUser(userEmail: String?, enabled: Boolean) {
+        val userKey = if (userEmail.isNullOrBlank() || userEmail.equals("guest", ignoreCase = true) || userEmail.equals("offline", ignoreCase = true)) {
+            "guest"
+        } else {
+            com.example.data.local.AppDatabase.sanitizeUserKey(userEmail)
+        }
+        prefs.edit()
+            .putBoolean("${KEY_BACKUP_ENCRYPTION_ENABLED}_$userKey", enabled)
+            .putBoolean(KEY_BACKUP_ENCRYPTION_ENABLED, enabled)
+            .apply()
+    }
+
     var isHapticFeedbackEnabled: Boolean
         get() = prefs.getBoolean(KEY_HAPTIC_FEEDBACK_ENABLED, true)
         set(value) = prefs.edit().putBoolean(KEY_HAPTIC_FEEDBACK_ENABLED, value).apply()
 
+    fun isHapticFeedbackEnabledForUser(userEmail: String?): Boolean {
+        val userKey = if (userEmail.isNullOrBlank() || userEmail.equals("guest", ignoreCase = true) || userEmail.equals("offline", ignoreCase = true)) {
+            "guest"
+        } else {
+            com.example.data.local.AppDatabase.sanitizeUserKey(userEmail)
+        }
+        val perUserKey = "${KEY_HAPTIC_FEEDBACK_ENABLED}_$userKey"
+        return if (prefs.contains(perUserKey)) {
+            prefs.getBoolean(perUserKey, true)
+        } else {
+            isHapticFeedbackEnabled
+        }
+    }
+
+    fun setHapticFeedbackEnabledForUser(userEmail: String?, enabled: Boolean) {
+        val userKey = if (userEmail.isNullOrBlank() || userEmail.equals("guest", ignoreCase = true) || userEmail.equals("offline", ignoreCase = true)) {
+            "guest"
+        } else {
+            com.example.data.local.AppDatabase.sanitizeUserKey(userEmail)
+        }
+        prefs.edit()
+            .putBoolean("${KEY_HAPTIC_FEEDBACK_ENABLED}_$userKey", enabled)
+            .putBoolean(KEY_HAPTIC_FEEDBACK_ENABLED, enabled)
+            .apply()
+    }
+
     var isFloatingEffectEnabled: Boolean
         get() = prefs.getBoolean(KEY_FLOATING_EFFECT_ENABLED, true)
         set(value) = prefs.edit().putBoolean(KEY_FLOATING_EFFECT_ENABLED, value).apply()
+
+    fun isFloatingEffectEnabledForUser(userEmail: String?): Boolean {
+        val userKey = if (userEmail.isNullOrBlank() || userEmail.equals("guest", ignoreCase = true) || userEmail.equals("offline", ignoreCase = true)) {
+            "guest"
+        } else {
+            com.example.data.local.AppDatabase.sanitizeUserKey(userEmail)
+        }
+        val perUserKey = "${KEY_FLOATING_EFFECT_ENABLED}_$userKey"
+        return if (prefs.contains(perUserKey)) {
+            prefs.getBoolean(perUserKey, true)
+        } else {
+            isFloatingEffectEnabled
+        }
+    }
+
+    fun setFloatingEffectEnabledForUser(userEmail: String?, enabled: Boolean) {
+        val userKey = if (userEmail.isNullOrBlank() || userEmail.equals("guest", ignoreCase = true) || userEmail.equals("offline", ignoreCase = true)) {
+            "guest"
+        } else {
+            com.example.data.local.AppDatabase.sanitizeUserKey(userEmail)
+        }
+        prefs.edit()
+            .putBoolean("${KEY_FLOATING_EFFECT_ENABLED}_$userKey", enabled)
+            .putBoolean(KEY_FLOATING_EFFECT_ENABLED, enabled)
+            .apply()
+    }
+
+    var refreshRateMode: String
+        get() = prefs.getString(KEY_REFRESH_RATE_MODE, "ADAPTIVE") ?: "ADAPTIVE"
+        set(value) = prefs.edit().putString(KEY_REFRESH_RATE_MODE, value).apply()
+
+    fun getRefreshRateModeForUser(userEmail: String?): String {
+        val userKey = if (userEmail.isNullOrBlank() || userEmail.equals("guest", ignoreCase = true) || userEmail.equals("offline", ignoreCase = true)) {
+            "guest"
+        } else {
+            com.example.data.local.AppDatabase.sanitizeUserKey(userEmail)
+        }
+        val perUserKey = "${KEY_REFRESH_RATE_MODE}_$userKey"
+        return if (prefs.contains(perUserKey)) {
+            prefs.getString(perUserKey, "ADAPTIVE") ?: "ADAPTIVE"
+        } else {
+            refreshRateMode
+        }
+    }
+
+    fun setRefreshRateModeForUser(userEmail: String?, mode: String) {
+        val userKey = if (userEmail.isNullOrBlank() || userEmail.equals("guest", ignoreCase = true) || userEmail.equals("offline", ignoreCase = true)) {
+            "guest"
+        } else {
+            com.example.data.local.AppDatabase.sanitizeUserKey(userEmail)
+        }
+        val perUserKey = "${KEY_REFRESH_RATE_MODE}_$userKey"
+        prefs.edit()
+            .putString(perUserKey, mode)
+            .putString(KEY_REFRESH_RATE_MODE, mode)
+            .apply()
+    }
 
     var backupPassphrase: String?
         get() {
@@ -184,9 +403,59 @@ class AppPreferences(private val context: Context) {
             prefs.edit().remove(KEY_BACKUP_PASSPHRASE).apply()
         }
 
+    fun getBackupPassphraseForUser(userEmail: String?): String? {
+        val userKey = if (userEmail.isNullOrBlank() || userEmail.equals("guest", ignoreCase = true) || userEmail.equals("offline", ignoreCase = true)) {
+            "guest"
+        } else {
+            com.example.data.local.AppDatabase.sanitizeUserKey(userEmail)
+        }
+        return try {
+            SecureTokenManager(context).getBackupPassphraseForUser(userKey)
+        } catch (_: Exception) {
+            backupPassphrase
+        }
+    }
+
+    fun setBackupPassphraseForUser(userEmail: String?, passphrase: String?) {
+        val userKey = if (userEmail.isNullOrBlank() || userEmail.equals("guest", ignoreCase = true) || userEmail.equals("offline", ignoreCase = true)) {
+            "guest"
+        } else {
+            com.example.data.local.AppDatabase.sanitizeUserKey(userEmail)
+        }
+        try {
+            SecureTokenManager(context).saveBackupPassphraseForUser(userKey, passphrase)
+        } catch (_: Exception) {}
+    }
+
     var themeMode: String
         get() = prefs.getString(KEY_THEME_MODE, "SYSTEM") ?: "SYSTEM"
         set(value) = prefs.edit().putString(KEY_THEME_MODE, value).apply()
+
+    fun getThemeModeForUser(userEmail: String?): String {
+        val userKey = if (userEmail.isNullOrBlank() || userEmail.equals("guest", ignoreCase = true) || userEmail.equals("offline", ignoreCase = true)) {
+            "guest"
+        } else {
+            com.example.data.local.AppDatabase.sanitizeUserKey(userEmail)
+        }
+        val perUserKey = "${KEY_THEME_MODE}_$userKey"
+        return if (prefs.contains(perUserKey)) {
+            prefs.getString(perUserKey, "SYSTEM") ?: "SYSTEM"
+        } else {
+            themeMode
+        }
+    }
+
+    fun setThemeModeForUser(userEmail: String?, mode: String) {
+        val userKey = if (userEmail.isNullOrBlank() || userEmail.equals("guest", ignoreCase = true) || userEmail.equals("offline", ignoreCase = true)) {
+            "guest"
+        } else {
+            com.example.data.local.AppDatabase.sanitizeUserKey(userEmail)
+        }
+        prefs.edit()
+            .putString("${KEY_THEME_MODE}_$userKey", mode)
+            .putString(KEY_THEME_MODE, mode)
+            .apply()
+    }
 
     var isLoggedOut: Boolean
         get() = prefs.getBoolean(KEY_IS_LOGGED_OUT, false)
@@ -576,6 +845,7 @@ class AppPreferences(private val context: Context) {
         private const val KEY_BACKUP_PASSPHRASE = "backup_passphrase"
         private const val KEY_HAPTIC_FEEDBACK_ENABLED = "haptic_feedback_enabled"
         private const val KEY_FLOATING_EFFECT_ENABLED = "floating_effect_enabled"
+        private const val KEY_REFRESH_RATE_MODE = "refresh_rate_mode"
         private const val KEY_IS_LOGGED_OUT = "is_logged_out"
         private const val KEY_IS_OFFLINE_MODE = "is_offline_mode"
         private const val KEY_LAST_USER_EMAIL = "last_user_email"

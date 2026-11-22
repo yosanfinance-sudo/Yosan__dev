@@ -8,6 +8,16 @@ import java.util.Locale
 
 object CurrencyFormatter {
 
+    private val indianLocale = Locale.Builder().setLanguage("en").setRegion("IN").build()
+    private val indianSymbols = DecimalFormatSymbols(indianLocale)
+
+    private val inrDecimalFormat = ThreadLocal.withInitial {
+        DecimalFormat("##,##,##0.00", indianSymbols)
+    }
+    private val inrNoDecimalFormat = ThreadLocal.withInitial {
+        DecimalFormat("##,##,##0", indianSymbols)
+    }
+
     fun roundFinancialAmount(amount: Double): Double {
         return try {
             java.math.BigDecimal.valueOf(amount)
@@ -21,9 +31,7 @@ object CurrencyFormatter {
     fun formatInr(amount: Double, includeDecimals: Boolean = true): String {
         return try {
             val rounded = roundFinancialAmount(amount)
-            val symbols = DecimalFormatSymbols(Locale.Builder().setLanguage("en").setRegion("IN").build())
-            val pattern = if (includeDecimals) "##,##,##0.00" else "##,##,##0"
-            val formatter = DecimalFormat(pattern, symbols)
+            val formatter = if (includeDecimals) inrDecimalFormat.get() else inrNoDecimalFormat.get()
             "₹ " + formatter.format(rounded)
         } catch (e: Exception) {
             "₹ " + String.format(Locale.ENGLISH, "%.2f", amount)
@@ -42,50 +50,44 @@ object CurrencyFormatter {
 }
 
 object DateUtils {
-    private val isoFormat = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
-    private val displayFormat = SimpleDateFormat("dd MMM yyyy", Locale.ENGLISH)
-    private val shortDisplayFormat = SimpleDateFormat("dd MMM", Locale.ENGLISH)
-    private val monthFormat = SimpleDateFormat("MMMM yyyy", Locale.ENGLISH)
+    private val isoFormat = ThreadLocal.withInitial { SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH) }
+    private val displayFormat = ThreadLocal.withInitial { SimpleDateFormat("dd MMM yyyy", Locale.ENGLISH) }
+    private val shortDisplayFormat = ThreadLocal.withInitial { SimpleDateFormat("dd MMM", Locale.ENGLISH) }
+    private val monthFormat = ThreadLocal.withInitial { SimpleDateFormat("MMMM yyyy", Locale.ENGLISH) }
+    private val dateTimeFormat = ThreadLocal.withInitial { SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.ENGLISH) }
 
-    @Synchronized
-    fun getCurrentDate(): String = isoFormat.format(Date())
+    fun getCurrentDate(): String = isoFormat.get().format(Date())
 
-    @Synchronized
     fun formatForDisplay(isoDate: String): String {
         return try {
-            val date = isoFormat.parse(isoDate) ?: return isoDate
-            displayFormat.format(date)
+            val date = isoFormat.get().parse(isoDate) ?: return isoDate
+            displayFormat.get().format(date)
         } catch (e: Exception) {
             isoDate
         }
     }
 
-    @Synchronized
     fun formatShortDisplay(isoDate: String): String {
         return try {
-            val date = isoFormat.parse(isoDate) ?: return isoDate
-            shortDisplayFormat.format(date)
+            val date = isoFormat.get().parse(isoDate) ?: return isoDate
+            shortDisplayFormat.get().format(date)
         } catch (e: Exception) {
             isoDate
         }
     }
 
-    @Synchronized
     fun formatMonthHeader(isoDate: String): String {
         return try {
-            val date = isoFormat.parse(isoDate) ?: return isoDate
-            monthFormat.format(date)
+            val date = isoFormat.get().parse(isoDate) ?: return isoDate
+            monthFormat.get().format(date)
         } catch (e: Exception) {
             isoDate
         }
     }
 
-    private val dateTimeFormat = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.ENGLISH)
-
-    @Synchronized
     fun formatDateTime(timestamp: Long): String {
         return try {
-            dateTimeFormat.format(Date(timestamp))
+            dateTimeFormat.get().format(Date(timestamp))
         } catch (_: Exception) {
             timestamp.toString()
         }

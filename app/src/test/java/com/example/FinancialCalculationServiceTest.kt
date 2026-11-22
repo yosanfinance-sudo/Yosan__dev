@@ -328,4 +328,86 @@ class FinancialCalculationServiceTest {
         cal.set(java.util.Calendar.HOUR_OF_DAY, 4)
         assertEquals("Good night", FinancialCalculationService.getGreeting(cal))
     }
+
+    @Test
+    fun testMultiCategoryExpenseBreakdownSplitsProportionally() {
+        val categories = listOf(
+            CategoryEntity(id = 1, name = "Home", type = CategoryType.EXPENSE, colorHex = "#EF4444"),
+            CategoryEntity(id = 2, name = "Savings", type = CategoryType.EXPENSE, colorHex = "#10B981"),
+            CategoryEntity(id = 3, name = "Food", type = CategoryType.EXPENSE, colorHex = "#3B82F6")
+        )
+
+        val transactions = listOf(
+            // Single category transaction: ₹1,000 for Food
+            TransactionEntity(
+                id = 1,
+                transactionDate = "2026-11-01",
+                description = "Swiggy food order",
+                debitAmount = 1000.0,
+                amount = 1000.0,
+                categoryName = "Food",
+                transactionType = TransactionType.EXPENSE
+            ),
+            // Multi-category transaction: ₹5,000 for Home, Savings (e.g. keyword 'vijaya')
+            TransactionEntity(
+                id = 2,
+                transactionDate = "2026-11-02",
+                description = "UPI Vijaya payment",
+                debitAmount = 5000.0,
+                amount = 5000.0,
+                categoryName = "Home, Savings",
+                transactionType = TransactionType.EXPENSE
+            )
+        )
+
+        val breakdown = FinancialCalculationService.calculateCategoryExpenseBreakdown(transactions, categories)
+
+        // Total expense = 6000.0
+        // Food = 1000.0
+        // Home = 2500.0
+        // Savings = 2500.0
+        assertEquals(3, breakdown.size)
+
+        val foodItem = breakdown.first { it.categoryName == "Food" }
+        val homeItem = breakdown.first { it.categoryName == "Home" }
+        val savingsItem = breakdown.first { it.categoryName == "Savings" }
+
+        assertEquals(1000.0, foodItem.amount, 0.001)
+        assertEquals(2500.0, homeItem.amount, 0.001)
+        assertEquals(2500.0, savingsItem.amount, 0.001)
+
+        // Total of all split amounts must equal total transaction expense
+        val sumAmounts = breakdown.sumOf { it.amount }
+        assertEquals(6000.0, sumAmounts, 0.001)
+    }
+
+    @Test
+    fun testMultiCategoryEngineCategorizationCombinesMatches() {
+        val rules = listOf(
+            CategorizationRuleEntity(
+                id = 1,
+                keyword = "vijaya",
+                categoryId = 1,
+                categoryName = "Home",
+                transactionType = TransactionType.EXPENSE,
+                priority = 1,
+                matchType = MatchType.CONTAINS
+            ),
+            CategorizationRuleEntity(
+                id = 2,
+                keyword = "vijaya",
+                categoryId = 2,
+                categoryName = "Savings",
+                transactionType = TransactionType.EXPENSE,
+                priority = 2,
+                matchType = MatchType.CONTAINS
+            )
+        )
+
+        val result = com.example.features.rules.CategorizationEngine.categorize("UPI-VIJAYA-EXP", rules, isCredit = false)
+
+        // Highest priority rule is Savings (priority 2), both categories joined with comma
+        assertEquals("Savings, Home", result.categoryName)
+        assertEquals(2L, result.categoryId)
+    }
 }

@@ -48,6 +48,9 @@ object CategorizationEngine {
             }
         }.sortedByDescending { it.priority }
 
+        val matchedRules = mutableListOf<CategorizationRuleEntity>()
+        var highestConfidence = 0.85f
+
         for (rule in activeSortedRules) {
             val normalizedKeyword = normalize(rule.keyword)
             if (normalizedKeyword.isBlank()) continue
@@ -61,20 +64,41 @@ object CategorizationEngine {
             }
 
             if (isMatch) {
+                matchedRules.add(rule)
                 val confidence = when {
                     rule.matchType == MatchType.EXACT -> 1.0f
                     normalizedDesc == normalizedKeyword -> 1.0f
                     runCatching { normalizedDesc.contains("\\b${Regex.escape(normalizedKeyword)}\\b".toRegex()) }.getOrDefault(false) -> 0.95f
                     else -> 0.85f
                 }
-                return CategorizationResult(
-                    categoryId = rule.categoryId,
-                    categoryName = rule.categoryName,
-                    transactionType = rule.transactionType,
-                    confidence = confidence,
-                    matchedRule = rule
-                )
+                if (confidence > highestConfidence) {
+                    highestConfidence = confidence
+                }
             }
+        }
+
+        if (matchedRules.isNotEmpty()) {
+            val primaryRule = matchedRules.first()
+            // If the same keyword or narration matches rules with multiple distinct categories,
+            // collect all of them and join comma-separated (e.g. "Food, Office Expense")
+            val distinctCategories = matchedRules
+                .map { it.categoryName.trim() }
+                .filter { it.isNotBlank() && !it.equals("Uncategorized", ignoreCase = true) }
+                .distinct()
+
+            val combinedCategoryName = if (distinctCategories.isNotEmpty()) {
+                distinctCategories.joinToString(", ")
+            } else {
+                primaryRule.categoryName
+            }
+
+            return CategorizationResult(
+                categoryId = primaryRule.categoryId,
+                categoryName = combinedCategoryName,
+                transactionType = primaryRule.transactionType,
+                confidence = highestConfidence,
+                matchedRule = primaryRule
+            )
         }
 
         // Default fallback based on credit/debit

@@ -1,5 +1,7 @@
 package com.example.features.reports
 
+import com.example.utils.adaptiveScrollRate
+
 import com.example.features.walkthrough.SpotlightTourManager
 import com.example.features.walkthrough.SpotlightStep
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -14,6 +16,8 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -50,6 +54,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import com.example.data.local.entity.AccountEntity
+import com.example.data.local.entity.CategoryEntity
+import com.example.data.local.entity.CompanyExpenseEntity
+import com.example.data.local.entity.LoanEntity
 import com.example.data.local.entity.TransactionEntity
 import com.example.data.local.entity.TransactionType
 import com.example.features.sync.ExcelSyncService
@@ -64,6 +72,90 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
+object ReportsPreviewCache {
+    var cacheKey: String? = null
+    var cachedFile: File? = null
+    var cachedBitmaps: List<Bitmap> = emptyList()
+
+    fun update(key: String, file: File, bitmaps: List<Bitmap>) {
+        val old = cachedBitmaps
+        cacheKey = key
+        cachedFile = file
+        cachedBitmaps = bitmaps
+        old.forEach { bmp ->
+            if (!bitmaps.contains(bmp) && !bmp.isRecycled) {
+                try { bmp.recycle() } catch (_: Exception) {}
+            }
+        }
+    }
+
+    suspend fun prewarmDefaultReport(
+        context: Context,
+        transactions: List<TransactionEntity>,
+        loans: List<LoanEntity>,
+        companyExpenses: List<CompanyExpenseEntity>,
+        accounts: List<AccountEntity>,
+        categories: List<CategoryEntity>,
+        userName: String?
+    ) {
+        if (cachedBitmaps.isNotEmpty() || transactions.isEmpty()) return
+        withContext(Dispatchers.IO) {
+            try {
+                val key = "OVERALL_SUMMARY_ALL_TIME_______${transactions.size}_${transactions.firstOrNull()?.id}_${transactions.lastOrNull()?.id}_${loans.size}_${companyExpenses.size}_$userName"
+                if (cacheKey == key && cachedBitmaps.isNotEmpty()) return@withContext
+
+                val summary = withContext(Dispatchers.Default) {
+                    FinancialCalculationService.calculateSummary(transactions, loans, companyExpenses, accounts)
+                }
+                val catExp = withContext(Dispatchers.Default) {
+                    FinancialCalculationService.calculateCategoryExpenseBreakdown(transactions, categories)
+                }
+                val catInc = withContext(Dispatchers.Default) {
+                    FinancialCalculationService.calculateCategoryIncomeBreakdown(transactions, categories)
+                }
+                val monthly = withContext(Dispatchers.Default) {
+                    FinancialCalculationService.calculateMonthlyTrends(transactions)
+                }
+
+                val file = ExportService.generatePdfReport(
+                    context = context,
+                    summary = summary,
+                    categoryExpenseBreakdown = catExp,
+                    categoryIncomeBreakdown = catInc,
+                    monthlyTrends = monthly,
+                    loans = loans,
+                    allTransactions = transactions,
+                    companyExpenses = companyExpenses,
+                    userName = userName,
+                    reportType = ReportType.OVERALL_SUMMARY,
+                    periodLabel = "All Time",
+                    accounts = accounts
+                )
+
+                val bitmaps = mutableListOf<Bitmap>()
+                ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
+                    PdfRenderer(pfd).use { renderer ->
+                        if (renderer.pageCount > 0) {
+                            renderer.openPage(0).use { page ->
+                                val w = (page.width * 1.5f).toInt()
+                                val h = (page.height * 1.5f).toInt()
+                                val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                                val canvas = Canvas(bmp)
+                                canvas.drawColor(android.graphics.Color.WHITE)
+                                page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                bitmaps.add(bmp)
+                            }
+                        }
+                    }
+                }
+                if (bitmaps.isNotEmpty()) {
+                    update(key, file, bitmaps)
+                }
+            } catch (_: Exception) {}
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReportsScreen(
@@ -75,6 +167,7 @@ fun ReportsScreen(
 
     // ViewModel Flows
     val allTransactions by viewModel.allTransactions.collectAsState()
+    val isDataLoaded by viewModel.isDataLoaded.collectAsState()
     val loans by viewModel.loans.collectAsState()
     val companyExpenses by viewModel.companyExpenses.collectAsState()
     val accounts by viewModel.accounts.collectAsState()
@@ -96,13 +189,12 @@ fun ReportsScreen(
     var showCustomDateDialog by remember { mutableStateOf(false) }
     var selectedAccountId by remember { mutableStateOf<Long?>(null) }
     var selectedCategoryName by remember { mutableStateOf<String?>(null) }
-    var lastRefreshedTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var isRefreshing by remember { mutableStateOf(false) }
 
-    var pdfPreviewBitmaps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
+    var pdfPreviewBitmaps by remember { mutableStateOf<List<Bitmap>>(ReportsPreviewCache.cachedBitmaps) }
     var currentPageIndex by remember { mutableIntStateOf(0) }
-    var generatedFile by remember { mutableStateOf<File?>(null) }
-    var isRendering by remember { mutableStateOf(true) }
+    var generatedFile by remember { mutableStateOf<File?>(ReportsPreviewCache.cachedFile) }
+    var isRendering by remember { mutableStateOf(ReportsPreviewCache.cachedBitmaps.isEmpty()) }
     var showFlipkartFilterSheet by remember { mutableStateOf(false) }
 
     val activeFilterCount = remember(selectedReportType, selectedDateRange, selectedAccountId, selectedCategoryName) {
@@ -139,7 +231,14 @@ fun ReportsScreen(
             matchesCash &&
             ExportService.matchesDateRange(tx.transactionDate, selectedDateRange, customStartDate, customEndDate) &&
                     (selectedAccountId == null || tx.accountId == selectedAccountId) &&
-                    (selectedCategoryName == null || tx.categoryName.equals(selectedCategoryName, ignoreCase = true))
+                    (selectedCategoryName == null || 
+                        if (selectedCategoryName.equals("Uncategorized", ignoreCase = true)) {
+                            tx.categoryName.isNullOrBlank() || tx.categoryName.equals("Uncategorized", ignoreCase = true) || tx.categoryId == null
+                        } else {
+                            tx.categoryName.split(",")
+                                .any { it.trim().equals(selectedCategoryName, ignoreCase = true) }
+                        }
+                    )
         }
     }
 
@@ -155,40 +254,51 @@ fun ReportsScreen(
         }
     }
 
-    val filteredSummary = remember(filteredTransactions, filteredLoans, filteredCompanyExpenses, accounts) {
-        FinancialCalculationService.calculateSummary(
-            transactions = filteredTransactions,
-            loans = filteredLoans,
-            companyExpenses = filteredCompanyExpenses,
-            accounts = accounts
-        )
-    }
-
-    val filteredCategoryExpenseBreakdown = remember(filteredTransactions, categories) {
-        FinancialCalculationService.calculateCategoryExpenseBreakdown(filteredTransactions, categories)
-    }
-    val filteredCategoryIncomeBreakdown = remember(filteredTransactions, categories) {
-        FinancialCalculationService.calculateCategoryIncomeBreakdown(filteredTransactions, categories)
-    }
-    val filteredMonthlyTrends = remember(filteredTransactions, categories) {
-        FinancialCalculationService.calculateMonthlyTrends(filteredTransactions)
-    }
-
     // Regenerate & Render PDF whenever filters, report type, or sync time change
     LaunchedEffect(
         selectedReportType, selectedDateRange, customStartDate, customEndDate,
-        selectedAccountId, selectedCategoryName, filteredTransactions, filteredLoans,
-        filteredCompanyExpenses, userProfile?.name, lastRefreshedTime
+        selectedAccountId, selectedCategoryName, filteredTransactions.size,
+        filteredTransactions.firstOrNull()?.id, filteredTransactions.lastOrNull()?.id,
+        filteredLoans.size, filteredCompanyExpenses.size, userProfile?.name, isDataLoaded
     ) {
-        isRendering = true
+        if (!isDataLoaded && allTransactions.isEmpty()) return@LaunchedEffect
+
+        val currentCacheKey = "${selectedReportType.name}_${selectedDateRange.name}_${customStartDate}_${customEndDate}_${selectedAccountId}_${selectedCategoryName}_${filteredTransactions.size}_${filteredTransactions.firstOrNull()?.id}_${filteredTransactions.lastOrNull()?.id}_${filteredLoans.size}_${filteredCompanyExpenses.size}_${userProfile?.name}"
+
+        if (ReportsPreviewCache.cacheKey == currentCacheKey && ReportsPreviewCache.cachedBitmaps.isNotEmpty()) {
+            pdfPreviewBitmaps = ReportsPreviewCache.cachedBitmaps
+            generatedFile = ReportsPreviewCache.cachedFile
+            isRendering = false
+            return@LaunchedEffect
+        }
+
+        isRendering = pdfPreviewBitmaps.isEmpty()
         withContext(Dispatchers.IO) {
             try {
+                val summary = withContext(Dispatchers.Default) {
+                    FinancialCalculationService.calculateSummary(
+                        transactions = filteredTransactions,
+                        loans = filteredLoans,
+                        companyExpenses = filteredCompanyExpenses,
+                        accounts = accounts
+                    )
+                }
+                val catExp = withContext(Dispatchers.Default) {
+                    FinancialCalculationService.calculateCategoryExpenseBreakdown(filteredTransactions, categories)
+                }
+                val catInc = withContext(Dispatchers.Default) {
+                    FinancialCalculationService.calculateCategoryIncomeBreakdown(filteredTransactions, categories)
+                }
+                val monthly = withContext(Dispatchers.Default) {
+                    FinancialCalculationService.calculateMonthlyTrends(filteredTransactions)
+                }
+
                 val file = ExportService.generatePdfReport(
                     context = context,
-                    summary = filteredSummary,
-                    categoryExpenseBreakdown = filteredCategoryExpenseBreakdown,
-                    categoryIncomeBreakdown = filteredCategoryIncomeBreakdown,
-                    monthlyTrends = filteredMonthlyTrends,
+                    summary = summary,
+                    categoryExpenseBreakdown = catExp,
+                    categoryIncomeBreakdown = catInc,
+                    monthlyTrends = monthly,
                     loans = filteredLoans,
                     allTransactions = filteredTransactions,
                     companyExpenses = filteredCompanyExpenses,
@@ -202,27 +312,54 @@ fun ReportsScreen(
                 val bitmaps = mutableListOf<Bitmap>()
                 ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
                     PdfRenderer(pfd).use { renderer ->
-                        for (i in 0 until renderer.pageCount) {
-                            renderer.openPage(i).use { page ->
-                                val width = (page.width * 1.5f).toInt()
-                                val height = (page.height * 1.5f).toInt()
+                        val pageCount = renderer.pageCount
+                        if (pageCount > 0) {
+                            // 1. Immediately render Page 0 for instant user visibility
+                            renderer.openPage(0).use { firstPage ->
+                                val width = (firstPage.width * 1.5f).toInt()
+                                val height = (firstPage.height * 1.5f).toInt()
                                 val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                                 val canvas = Canvas(bmp)
                                 canvas.drawColor(android.graphics.Color.WHITE)
-                                page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                firstPage.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                                 bitmaps.add(bmp)
                             }
+
+                            val firstPageList = bitmaps.toList()
+                            withContext(Dispatchers.Main) {
+                                pdfPreviewBitmaps = firstPageList
+                                isRendering = false
+                                if (currentPageIndex >= pageCount) {
+                                    currentPageIndex = 0
+                                }
+                            }
+
+                            // 2. Progressively render the remaining pages in the background
+                            for (i in 1 until pageCount) {
+                                renderer.openPage(i).use { page ->
+                                    val width = (page.width * 1.5f).toInt()
+                                    val height = (page.height * 1.5f).toInt()
+                                    val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                                    val canvas = Canvas(bmp)
+                                    canvas.drawColor(android.graphics.Color.WHITE)
+                                    page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                    bitmaps.add(bmp)
+                                }
+                            }
+
+                            val allPagesList = bitmaps.toList()
+                            withContext(Dispatchers.Main) {
+                                pdfPreviewBitmaps = allPagesList
+                            }
+
+                            ReportsPreviewCache.update(currentCacheKey, file, allPagesList)
                         }
                     }
                 }
-                val oldBitmaps = pdfPreviewBitmaps
-                pdfPreviewBitmaps = bitmaps
-                oldBitmaps.forEach { if (!it.isRecycled) it.recycle() }
-                if (currentPageIndex >= bitmaps.size) {
-                    currentPageIndex = 0
-                }
             } catch (_: Exception) {}
-            isRendering = false
+            withContext(Dispatchers.Main) {
+                isRendering = false
+            }
         }
     }
 
@@ -319,15 +456,15 @@ fun ReportsScreen(
             .fillMaxSize()
             .testTag("reports_screen")
     ) {
-        // 1. Flipkart-Style Quick Filter Bar
+        // 1. Quick Filter Bar (Crisp & Compact)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 16.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Main Flipkart Filter Trigger Button (Seamless Blended Style)
+            // Main Filter Trigger Button
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 shape = RoundedCornerShape(12.dp),
@@ -345,22 +482,22 @@ fun ReportsScreen(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.FilterList,
                         contentDescription = "Filters",
                         tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(15.dp)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(5.dp))
                     Text(
                         text = if (activeFilterCount > 0) "Filters ($activeFilterCount)" else "Filters",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    Spacer(modifier = Modifier.width(3.dp))
+                    Spacer(modifier = Modifier.width(2.dp))
                     Icon(
                         imageVector = Icons.Default.ArrowDropDown,
                         contentDescription = null,
@@ -538,6 +675,7 @@ fun ReportsScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
+                .adaptiveScrollRate()
                 .weight(1f),
             contentPadding = PaddingValues(16.dp)
         ) {
@@ -579,8 +717,49 @@ fun ReportsScreen(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     if (isRendering && pdfPreviewBitmaps.isEmpty()) {
-                        SkeletonReportsLoading(modifier = Modifier.fillMaxWidth())
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(0.707f)
+                                .shadow(2.dp, RoundedCornerShape(16.dp))
+                                .clip(RoundedCornerShape(16.dp)),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                        ) {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(32.dp),
+                                        strokeWidth = 2.5.dp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = "Preparing Report Preview...",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
                     } else if (pdfPreviewBitmaps.isNotEmpty()) {
+                        if (isRendering) {
+                            LinearProgressIndicator(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(2.dp)
+                                    .clip(RoundedCornerShape(1.dp)),
+                                color = MaterialTheme.colorScheme.primary,
+                                trackColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+
                         // Multi-page navigation controls
                         if (pdfPreviewBitmaps.size > 1) {
                             Row(
@@ -622,6 +801,8 @@ fun ReportsScreen(
                         }
 
                         val currentBmp = pdfPreviewBitmaps.getOrNull(currentPageIndex) ?: pdfPreviewBitmaps.first()
+                        val currentImageBitmap = remember(currentBmp) { currentBmp.asImageBitmap() }
+
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -632,14 +813,14 @@ fun ReportsScreen(
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .shadow(4.dp, RoundedCornerShape(16.dp))
+                                    .shadow(2.dp, RoundedCornerShape(16.dp))
                                     .clip(RoundedCornerShape(16.dp))
-                                    .blur(if (isMasked) 28.dp else 0.dp),
+                                    .then(if (isMasked) Modifier.blur(6.dp) else Modifier),
                                 colors = CardDefaults.cardColors(containerColor = Color.White),
                                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                             ) {
                                 Image(
-                                    bitmap = currentBmp.asImageBitmap(),
+                                    bitmap = currentImageBitmap,
                                     contentDescription = "PDF Report Preview",
                                     contentScale = ContentScale.FillWidth,
                                     modifier = Modifier
@@ -782,11 +963,11 @@ fun ReportsScreen(
             modifier = Modifier.fillMaxHeight(0.70f)
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                // Header (Flipkart Style: Title + Result count + Clear Filters + Close)
+                // Header (Crisp Title + Count + Clear + Close)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -831,16 +1012,16 @@ fun ReportsScreen(
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
 
-                // Flipkart 2-Column Body
+                // 2-Column Body
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
                 ) {
-                    // LEFT COLUMN (Categories, ~38% width)
+                    // LEFT COLUMN (Categories)
                     Column(
                         modifier = Modifier
-                            .width(135.dp)
+                            .width(130.dp)
                             .fillMaxHeight()
                             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.22f))
                     ) {
@@ -865,7 +1046,7 @@ fun ReportsScreen(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 14.dp),
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
@@ -908,9 +1089,9 @@ fun ReportsScreen(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight()
-                            .padding(12.dp)
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
                             .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         when (draftCategory) {
                             FlipkartFilterCategory.REPORT_TYPE -> {
@@ -930,7 +1111,7 @@ fun ReportsScreen(
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(horizontal = 8.dp, vertical = 10.dp),
+                                                .padding(horizontal = 6.dp, vertical = 5.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             RadioButton(
@@ -941,7 +1122,7 @@ fun ReportsScreen(
                                                 },
                                                 colors = RadioButtonDefaults.colors(selectedColor = FilterSelectionBlue)
                                             )
-                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
                                             Text(
                                                 text = rType.displayName,
                                                 style = MaterialTheme.typography.bodyMedium,
@@ -969,7 +1150,7 @@ fun ReportsScreen(
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(horizontal = 8.dp, vertical = 10.dp),
+                                                .padding(horizontal = 6.dp, vertical = 5.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             RadioButton(
@@ -980,7 +1161,7 @@ fun ReportsScreen(
                                                 },
                                                 colors = RadioButtonDefaults.colors(selectedColor = FilterSelectionBlue)
                                             )
-                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
                                             Text(
                                                 text = dFilter.displayName,
                                                 style = MaterialTheme.typography.bodyMedium,
@@ -1033,7 +1214,7 @@ fun ReportsScreen(
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                                            .padding(horizontal = 6.dp, vertical = 5.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         RadioButton(
@@ -1044,7 +1225,7 @@ fun ReportsScreen(
                                             },
                                             colors = RadioButtonDefaults.colors(selectedColor = FilterSelectionBlue)
                                         )
-                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
                                         Text(
                                             text = "All Accounts",
                                             style = MaterialTheme.typography.bodyMedium,
@@ -1070,7 +1251,7 @@ fun ReportsScreen(
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                                                .padding(horizontal = 6.dp, vertical = 5.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             RadioButton(
@@ -1081,7 +1262,7 @@ fun ReportsScreen(
                                                 },
                                                 colors = RadioButtonDefaults.colors(selectedColor = FilterSelectionBlue)
                                             )
-                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
                                             Column {
                                                 Text(
                                                     text = acc.bankName,
@@ -1117,7 +1298,7 @@ fun ReportsScreen(
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                                            .padding(horizontal = 6.dp, vertical = 5.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         RadioButton(
@@ -1128,12 +1309,48 @@ fun ReportsScreen(
                                             },
                                             colors = RadioButtonDefaults.colors(selectedColor = FilterSelectionBlue)
                                         )
-                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
                                         Text(
                                             text = "All Categories",
                                             style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = if (isAllSelected) FontWeight.Bold else FontWeight.Normal,
                                             color = if (isAllSelected) FilterSelectionBlue else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+
+                                val isUncatSelected = draftCategoryName.equals("Uncategorized", ignoreCase = true)
+                                Surface(
+                                    color = if (isUncatSelected) FilterSelectionBlue.copy(alpha = 0.12f) else Color.Transparent,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            HapticHelper.vibrateTick(context)
+                                            draftCategoryName = "Uncategorized"
+                                        }
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 6.dp, vertical = 5.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        RadioButton(
+                                            selected = isUncatSelected,
+                                            onClick = {
+                                                HapticHelper.vibrateTick(context)
+                                                draftCategoryName = "Uncategorized"
+                                            },
+                                            colors = RadioButtonDefaults.colors(selectedColor = FilterSelectionBlue)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "Uncategorized",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = if (isUncatSelected) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isUncatSelected) FilterSelectionBlue else MaterialTheme.colorScheme.onSurface
                                         )
                                     }
                                 }
@@ -1154,7 +1371,7 @@ fun ReportsScreen(
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                                                .padding(horizontal = 6.dp, vertical = 5.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             RadioButton(
@@ -1165,7 +1382,7 @@ fun ReportsScreen(
                                                 },
                                                 colors = RadioButtonDefaults.colors(selectedColor = FilterSelectionBlue)
                                             )
-                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
                                             Text(
                                                 text = cat.name,
                                                 style = MaterialTheme.typography.bodyMedium,
@@ -1182,11 +1399,11 @@ fun ReportsScreen(
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
 
-                // Bottom Sticky Flipkart Action Bar
+                // Bottom Sticky Action Bar
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp),
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     OutlinedButton(

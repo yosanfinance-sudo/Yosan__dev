@@ -48,6 +48,7 @@ class CategoryRuleCoordinator(
         val newList = mutableListOf<TransactionEntity>()
         try {
             val list = database.transactionDao().getAllTransactionsList()
+            val activeRules = database.categorizationRuleDao().getActiveRulesList()
             val normalizedKeyword = CategorizationEngine.normalize(keyword)
             if (normalizedKeyword.isBlank()) return Pair(emptyList(), emptyList())
 
@@ -69,8 +70,17 @@ class CategoryRuleCoordinator(
 
                     if (matchesDirection) {
                         prevList.add(tx)
-                        database.transactionDao().updateTransactionCategory(tx.id, categoryId, categoryName, transactionType)
-                        newList.add(tx.copy(categoryId = categoryId, categoryName = categoryName, transactionType = transactionType, updatedAt = System.currentTimeMillis()))
+                        val catResult = CategorizationEngine.categorize(tx.description, activeRules, isCredit = isTxCredit)
+                        val targetCatId = catResult.categoryId ?: categoryId
+                        val targetCatName = if (catResult.categoryName.isNotBlank() && !catResult.categoryName.equals("Uncategorized", ignoreCase = true)) {
+                            catResult.categoryName
+                        } else {
+                            categoryName
+                        }
+                        val targetType = catResult.transactionType
+
+                        database.transactionDao().updateTransactionCategory(tx.id, targetCatId, targetCatName, targetType)
+                        newList.add(tx.copy(categoryId = targetCatId, categoryName = targetCatName, transactionType = targetType, updatedAt = System.currentTimeMillis()))
                     }
                 }
             }
@@ -191,9 +201,13 @@ class CategoryRuleCoordinator(
                         relatedRuleId = id,
                         ruleSnapshot = rule
                     )
+                    showMessage("Rule deleted")
                 }
-            } catch (e: Exception) { android.util.Log.w("YosanDB", "Operation non-fatal failure", e) }
-            showMessage("Rule deleted")
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                android.util.Log.e("YosanDB", "Failed to delete rule", e)
+                showMessage("Failed to delete rule: ${e.localizedMessage ?: "Unknown error"}")
+            }
         }
     }
 
@@ -211,8 +225,12 @@ class CategoryRuleCoordinator(
                     relatedRuleId = rule.id,
                     ruleSnapshot = oldRule ?: rule
                 )
-            } catch (e: Exception) { android.util.Log.w("YosanDB", "Operation non-fatal failure", e) }
-            showMessage("Rule updated")
+                showMessage("Rule updated")
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                android.util.Log.e("YosanDB", "Failed to update rule", e)
+                showMessage("Failed to update rule: ${e.localizedMessage ?: "Unknown error"}")
+            }
         }
     }
 
@@ -331,8 +349,12 @@ class CategoryRuleCoordinator(
                         repository.updateRule(updatedRule)
                     }
                 }
-            } catch (e: Exception) { android.util.Log.w("YosanDB", "Operation non-fatal failure", e) }
-            showMessage("Category updated")
+                showMessage("Category updated")
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                android.util.Log.e("YosanDB", "Failed to update category", e)
+                showMessage("Failed to update category: ${e.localizedMessage ?: "Unknown error"}")
+            }
         }
     }
 }

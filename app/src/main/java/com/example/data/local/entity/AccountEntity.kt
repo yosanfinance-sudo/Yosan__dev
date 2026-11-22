@@ -1,5 +1,6 @@
 package com.example.data.local.entity
 
+import androidx.compose.runtime.Immutable
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -7,6 +8,7 @@ enum class AccountType {
     BANK, CASH, WALLET, CREDIT_CARD, OTHER
 }
 
+@Immutable
 @Entity(tableName = "accounts")
 data class AccountEntity(
     @PrimaryKey(autoGenerate = true)

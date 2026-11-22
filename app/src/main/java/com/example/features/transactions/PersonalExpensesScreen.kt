@@ -81,7 +81,7 @@ fun PersonalExpensesScreen(
         contentPadding = PaddingValues(bottom = 100.dp)
     ) {
         // 1. Header & Hero Metric Cards
-        item {
+        item(contentType = "header") {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -192,7 +192,7 @@ fun PersonalExpensesScreen(
 
         // 3. Transactions List
         if (filteredList.isEmpty()) {
-            item {
+            item(contentType = "empty_state") {
                 EmptyState(
                     icon = Icons.Outlined.ReceiptLong,
                     title = "No Personal Expenses",
@@ -202,7 +202,7 @@ fun PersonalExpensesScreen(
                 )
             }
         } else {
-            items(filteredList, key = { it.id }) { tx ->
+            items(filteredList, key = { it.id }, contentType = { "transaction_card" }) { tx ->
                 Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
                     TransactionItemCard(
                         transaction = tx,

@@ -90,12 +90,27 @@ fun MainContainerScreen(
     var showAddSheet by remember { mutableStateOf(false) }
     var showAiChatSheet by remember { mutableStateOf(false) }
     var autoOpenGeminiConfig by remember { mutableStateOf(false) }
+    var showGoogleAiOptInDialog by remember { mutableStateOf(false) }
     var addSheetTab by remember { mutableStateOf(AddTab.EXPENSE) }
     var preselectedLoanForRepay by remember { mutableStateOf<LoanEntity?>(null) }
     var selectedTransactionForDetail by remember { mutableStateOf<TransactionEntity?>(null) }
 
-        LaunchedEffect(Unit) {
-        if (!appPreferences.isProductTourCompleted) {
+    // Adaptive Refresh Rate Boost for Navigation & Bottom Sheet Transitions
+    LaunchedEffect(currentTab) {
+        com.example.utils.AdaptiveRefreshRateManager.requestHighRate("tab_change", 450L)
+    }
+    LaunchedEffect(currentSubScreen) {
+        com.example.utils.AdaptiveRefreshRateManager.requestHighRate("subscreen_change", 450L)
+    }
+    LaunchedEffect(showAddSheet, showAiChatSheet, selectedTransactionForDetail) {
+        com.example.utils.AdaptiveRefreshRateManager.requestHighRate("sheet_transition", 450L)
+    }
+
+    val userProfile by viewModel.userProfile.collectAsState()
+
+    LaunchedEffect(userProfile?.email) {
+        val currentEmail = userProfile?.email
+        if (!appPreferences.isProductTourCompletedForUser(currentEmail)) {
             currentSubScreen = SubScreen.IMPORT_STATEMENT
             SpotlightTourManager.startTour()
         }
@@ -166,11 +181,11 @@ fun MainContainerScreen(
             SpotlightTourManager.activeStep != null -> {
                 currentTab = MainTab.DASHBOARD
                 currentSubScreen = SubScreen.NONE
-                appPreferences.isProductTourCompleted = true
+                appPreferences.setProductTourCompletedForUser(userProfile?.email, true)
                 SpotlightTourManager.dismissTour()
             }
             showIntroNoteDialog -> {
-                appPreferences.isIntroNoteDismissed = true
+                appPreferences.setIntroNoteDismissedForUser(userProfile?.email, true)
                 showIntroNoteDialog = false
             }
             showUserWalkthroughDialog -> showUserWalkthroughDialog = false
@@ -473,12 +488,25 @@ fun MainContainerScreen(
                                 onNavigateToTransfers = { currentSubScreen = SubScreen.TRANSFERS },
                                 onOpenAiChat = {
                                     val currentEmail = authViewModel?.user?.value?.email ?: appPreferences.lastUserEmail
+                                    val currentUser = authViewModel?.user?.value
+                                    val isGoogleAccount = currentUser != null && currentUser.googleSub.isNotBlank() &&
+                                        !currentUser.googleSub.startsWith("local_") &&
+                                        !currentUser.googleSub.startsWith("email_") &&
+                                        !currentUser.googleSub.startsWith("otp_") &&
+                                        !currentUser.googleSub.startsWith("user_")
+                                    val isGoogleDriveConnected = authViewModel?.driveStatus?.value?.isConnected == true
                                     val geminiKey = appPreferences.getGeminiApiKeyForUser(currentEmail).ifBlank { appPreferences.geminiApiKey }
-                                    if (geminiKey.isNotBlank()) {
-                                        showAiChatSheet = true
+                                    val isGoogleOptedIn = isGoogleAccount || isGoogleDriveConnected || geminiKey.isNotBlank()
+
+                                    if (isGoogleOptedIn) {
+                                        if (geminiKey.isNotBlank()) {
+                                            showAiChatSheet = true
+                                        } else {
+                                            currentTab = MainTab.SETTINGS
+                                            autoOpenGeminiConfig = true
+                                        }
                                     } else {
-                                        currentTab = MainTab.SETTINGS
-                                        autoOpenGeminiConfig = true
+                                        showGoogleAiOptInDialog = true
                                     }
                                 }
                             )
@@ -525,6 +553,47 @@ fun MainContainerScreen(
             }
 
             // Sheets & Dialogs
+            if (showGoogleAiOptInDialog) {
+                AlertDialog(
+                    onDismissRequest = { showGoogleAiOptInDialog = false },
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    },
+                    title = {
+                        Text("Google AI Opt-In Required", fontWeight = FontWeight.Bold)
+                    },
+                    text = {
+                        Text(
+                            "AI Financial Assistant features are powered by Google Gemini and require opting into Google services (such as signing in with Google or providing your Google Gemini API key). Offline and unlinked accounts cannot use AI features without opting in.",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                showGoogleAiOptInDialog = false
+                                currentTab = MainTab.SETTINGS
+                                autoOpenGeminiConfig = true
+                            }
+                        ) {
+                            Text("Set Gemini API Key")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = { showGoogleAiOptInDialog = false }
+                        ) {
+                            Text("Cancel")
+                        }
+                    }
+                )
+            }
+
             if (showAiChatSheet) {
                 FinancialChatSheet(
                     viewModel = viewModel,
@@ -567,20 +636,20 @@ fun MainContainerScreen(
                 )
             }
 
-                        // Introduction & Welcome Note Dialog (shown on first launch, dismissable)
+            // Introduction & Welcome Note Dialog (shown on first launch, dismissable)
             if (showIntroNoteDialog) {
                 IntroductionNoteDialog(
                     onGetStarted = {
-                        appPreferences.isIntroNoteDismissed = true
+                        appPreferences.setIntroNoteDismissedForUser(userProfile?.email, true)
                         showIntroNoteDialog = false
                     },
                     onOpenWalkthrough = {
-                        appPreferences.isIntroNoteDismissed = true
+                        appPreferences.setIntroNoteDismissedForUser(userProfile?.email, true)
                         showIntroNoteDialog = false
                         showUserWalkthroughDialog = true
                     },
                     onSkip = {
-                        appPreferences.isIntroNoteDismissed = true
+                        appPreferences.setIntroNoteDismissedForUser(userProfile?.email, true)
                         showIntroNoteDialog = false
                     }
                 )
@@ -592,7 +661,7 @@ fun MainContainerScreen(
                     onDismissRequest = { showUserWalkthroughDialog = false },
                     onCompleted = { dontShowAgain ->
                         if (dontShowAgain) {
-                            appPreferences.isWalkthroughCompleted = true
+                            appPreferences.setWalkthroughCompletedForUser(userProfile?.email, true)
                         }
                         showUserWalkthroughDialog = false
                     }
@@ -645,7 +714,7 @@ fun MainContainerScreen(
                         SpotlightStep.SETTINGS_SECURITY -> {
                             currentSubScreen = SubScreen.NONE
                             currentTab = MainTab.DASHBOARD
-                            appPreferences.isProductTourCompleted = true
+                            appPreferences.setProductTourCompletedForUser(userProfile?.email, true)
                             SpotlightTourManager.dismissTour()
                         }
                     }
@@ -692,7 +761,7 @@ fun MainContainerScreen(
                 onDismiss = {
                     currentSubScreen = SubScreen.NONE
                     currentTab = MainTab.DASHBOARD
-                    appPreferences.isProductTourCompleted = true
+                    appPreferences.setProductTourCompletedForUser(userProfile?.email, true)
                     SpotlightTourManager.dismissTour()
                 }
             )

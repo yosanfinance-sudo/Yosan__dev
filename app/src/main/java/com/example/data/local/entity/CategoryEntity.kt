@@ -1,5 +1,6 @@
 package com.example.data.local.entity
 
+import androidx.compose.runtime.Immutable
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -7,6 +8,7 @@ enum class CategoryType {
     INCOME, EXPENSE, LENDING, BORROWING, INVESTMENT, OTHER
 }
 
+@Immutable
 @Entity(tableName = "categories")
 data class CategoryEntity(
     @PrimaryKey(autoGenerate = true)

@@ -1,5 +1,6 @@
 package com.example.data.local.entity
 
+import androidx.compose.runtime.Immutable
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -7,6 +8,7 @@ enum class LoanStatus {
     ACTIVE, PARTIALLY_PAID, PAID, OVERDUE, CANCELLED
 }
 
+@Immutable
 @Entity(tableName = "loans")
 data class LoanEntity(
     @PrimaryKey(autoGenerate = true)

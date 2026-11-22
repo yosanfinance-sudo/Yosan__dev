@@ -302,7 +302,7 @@ ${maskedText.slice(0, 40000)}
 JSON:`;
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 18000);
+      const timeoutId = setTimeout(() => controller.abort(), 45000);
 
       // Gemini API Key securely transmitted via header, never in URL query parameter
       const apiUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';

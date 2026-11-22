@@ -501,6 +501,14 @@ fun RulesScreen(
             else allDescriptionWords.filter { it.contains(keyword.trim().lowercase()) }.take(10)
         }
 
+        val existingMatches = remember(keyword, rules, editingRule) {
+            val norm = keyword.trim().lowercase()
+            if (norm.isBlank()) emptyList()
+            else rules.filter { r ->
+                r.id != editingRule?.id && r.isActive && r.keyword.trim().equals(norm, ignoreCase = true)
+            }
+        }
+
         Dialog(onDismissRequest = {
             showAddRuleDialog = false
             editingRule = null
@@ -549,6 +557,34 @@ fun RulesScreen(
                                 SuggestionChip(
                                     onClick = { keyword = suggestion },
                                     label = { Text(suggestion, style = MaterialTheme.typography.labelSmall) }
+                                )
+                            }
+                        }
+                    }
+
+                    if (existingMatches.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        val existingCatNames = existingMatches.map { it.categoryName }.distinct().joinToString(", ")
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Info,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Also mapped to '$existingCatNames'. Matching transactions will be tagged together.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
                             }
                         }

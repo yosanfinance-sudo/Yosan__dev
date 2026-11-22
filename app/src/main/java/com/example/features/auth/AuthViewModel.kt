@@ -1431,7 +1431,12 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
                     val prefs = com.example.utils.AppPreferences(app)
                     prefs.isLoggedOut = false
-                    if (authRes.user.email.isNotBlank()) prefs.lastUserEmail = authRes.user.email
+                    if (authRes.user.email.isNotBlank()) {
+                        prefs.lastUserEmail = authRes.user.email
+                        if (authRes.user.theme.isNotBlank()) {
+                            prefs.setThemeModeForUser(authRes.user.email, authRes.user.theme)
+                        }
+                    }
                     if (authRes.user.name.isNotBlank()) prefs.lastUserName = authRes.user.name
 
                     val existingAccounts = database.accountDao().getAllAccountsList()

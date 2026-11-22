@@ -89,7 +89,7 @@ fun InvestmentsScreen(
         contentPadding = PaddingValues(bottom = 100.dp)
     ) {
         // 1. Header & Hero Metric Cards
-        item {
+        item(contentType = "header") {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -179,7 +179,7 @@ fun InvestmentsScreen(
 
         // 3. Investment Sets List
         if (filteredSummaries.isEmpty()) {
-            item {
+            item(contentType = "empty_state") {
                 EmptyState(
                     icon = Icons.Outlined.TrendingUp,
                     title = "No Investments Logged",
@@ -189,7 +189,7 @@ fun InvestmentsScreen(
                 )
             }
         } else {
-            items(filteredSummaries, key = { it.categoryName }) { summary ->
+            items(filteredSummaries, key = { it.categoryName }, contentType = { "investment_summary" }) { summary ->
                 InvestmentSetCard(
                     summary = summary,
                     onAddDepositClick = onAddInvestmentClick,

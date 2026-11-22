@@ -136,6 +136,27 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
 
     init {
+        viewModelScope.launch {
+            userProfile.collect { profile ->
+                if (profile != null) {
+                    val userKey = com.example.data.local.AppDatabase.sanitizeUserKey(profile.email)
+                    val appPrefs = com.example.utils.AppPreferences(getApplication())
+                    _themeMode.value = appPrefs.getThemeModeForUser(userKey)
+                    _isHapticFeedbackEnabled.value = appPrefs.isHapticFeedbackEnabledForUser(userKey)
+                    _isFloatingEffectEnabled.value = appPrefs.isFloatingEffectEnabledForUser(userKey)
+                    _refreshRateMode.value = appPrefs.getRefreshRateModeForUser(userKey)
+                    try {
+                        com.example.utils.AdaptiveRefreshRateManager.setMode(
+                            com.example.utils.RefreshRateMode.valueOf(_refreshRateMode.value)
+                        )
+                    } catch (_: Throwable) {
+                        com.example.utils.AdaptiveRefreshRateManager.setMode(com.example.utils.RefreshRateMode.ADAPTIVE)
+                    }
+                    _appLockTimeoutSeconds.value = appPrefs.getAppLockTimeoutForUser(userKey)
+                }
+            }
+        }
+
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val accList = database.accountDao().getAllAccountsList()
@@ -180,6 +201,22 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     fun showMessage(msg: String) { _uiMessage.value = msg }
     fun dismissMessage() { _uiMessage.value = null }
 
+    private val coroutineExceptionHandler = kotlinx.coroutines.CoroutineExceptionHandler { _, throwable ->
+        if (throwable !is kotlinx.coroutines.CancellationException) {
+            android.util.Log.e("FinanceViewModel", "Unhandled coroutine exception", throwable)
+            showMessage("Error: ${throwable.localizedMessage ?: "Unexpected error"}")
+        }
+    }
+
+    fun launchSafe(
+        context: kotlin.coroutines.CoroutineContext = kotlinx.coroutines.Dispatchers.IO,
+        block: suspend kotlinx.coroutines.CoroutineScope.() -> Unit
+    ): kotlinx.coroutines.Job {
+        return viewModelScope.launch(context + coroutineExceptionHandler) {
+            block()
+        }
+    }
+
     // Privacy Mode (Hide Financial Values)
     private val _isAmountTemporarilyRevealed = MutableStateFlow(false)
     val isAmountTemporarilyRevealed = _isAmountTemporarilyRevealed.asStateFlow()
@@ -205,23 +242,44 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updatePrivacyBlurPreference(enabled: Boolean, timeoutSeconds: Int) {
-        viewModelScope.launch {
+        launchSafe {
             database.userProfileDao().updatePrivacyBlurPreference(enabled, timeoutSeconds)
         }
     }
 
+    private fun getActiveUserKey(): String {
+        val email = userProfile.value?.email
+        if (!email.isNullOrBlank()) {
+            return com.example.data.local.AppDatabase.sanitizeUserKey(email)
+        }
+        return com.example.data.local.AppDatabase.getActiveUserKey()
+    }
+
     fun completeOnboarding(themeMode: String = "SYSTEM", privacyBlurEnabled: Boolean = true, timeoutSeconds: Int = 5) {
-        viewModelScope.launch {
+        launchSafe {
+            val userKey = getActiveUserKey()
+            val email = userProfile.value?.email
             val appPrefs = com.example.utils.AppPreferences(getApplication())
-            appPrefs.isOnboardingCompleted = true
-            appPrefs.themeMode = themeMode
+            appPrefs.setOnboardingCompletedForUser(userKey, true)
+            if (!email.isNullOrBlank()) {
+                appPrefs.setOnboardingCompletedForUser(email, true)
+            }
+            appPrefs.setThemeModeForUser(userKey, themeMode)
+            if (!email.isNullOrBlank()) {
+                appPrefs.setThemeModeForUser(email, themeMode)
+            }
             _themeMode.value = themeMode
             val isDarkBool = when (themeMode) {
                 "DARK" -> true
                 "LIGHT" -> false
                 else -> null
             }
-            appPrefs.isDarkMode = isDarkBool
+            if (isDarkBool != null) {
+                appPrefs.setDarkModeForUser(userKey, isDarkBool)
+                if (!email.isNullOrBlank()) {
+                    appPrefs.setDarkModeForUser(email, isDarkBool)
+                }
+            }
             val current = userProfile.value ?: UserProfileEntity(id = 1)
             val updated = current.copy(
                 isDarkMode = isDarkBool ?: false,
@@ -231,6 +289,10 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
             )
             database.userProfileDao().insertOrUpdateProfile(updated)
             database.userProfileDao().updateOnboardingCompleted(true)
+            appPrefs.setAppLockTimeoutForUser(userKey, timeoutSeconds)
+            if (!email.isNullOrBlank()) {
+                appPrefs.setAppLockTimeoutForUser(email, timeoutSeconds)
+            }
         }
     }
 
@@ -239,69 +301,79 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun resetOnboarding() {
-        viewModelScope.launch {
-            com.example.utils.AppPreferences(getApplication()).isOnboardingCompleted = false
+        launchSafe {
+            val userKey = getActiveUserKey()
+            val email = userProfile.value?.email
+            val appPrefs = com.example.utils.AppPreferences(getApplication())
+            appPrefs.setOnboardingCompletedForUser(userKey, false)
+            if (!email.isNullOrBlank()) {
+                appPrefs.setOnboardingCompletedForUser(email, false)
+            }
             database.userProfileDao().updateOnboardingCompleted(false)
         }
     }
 
     fun updateUserProfile(name: String, currencySymbol: String, email: String? = null) {
-        viewModelScope.launch {
+        launchSafe {
             val current = userProfile.value ?: UserProfileEntity(id = 1, name = name, email = email ?: "", currencySymbol = currencySymbol)
             repository.updateProfile(current.copy(name = name, currencySymbol = currencySymbol, email = email ?: current.email))
         }
     }
 
     fun toggleDarkMode(isDark: Boolean) {
-        viewModelScope.launch {
+        launchSafe {
             val mode = if (isDark) "DARK" else "LIGHT"
-            val appPrefs = com.example.utils.AppPreferences(getApplication())
-            appPrefs.themeMode = mode
-            _themeMode.value = mode
-            appPrefs.isDarkMode = isDark
-            repository.updateThemePreference(isDark)
+            setThemeMode(mode)
         }
     }
 
     private val _themeMode = MutableStateFlow(
-        com.example.utils.AppPreferences(application).themeMode
+        com.example.utils.AppPreferences(application).getThemeModeForUser(com.example.data.local.AppDatabase.getActiveUserKey())
     )
     val themeMode: StateFlow<String> = _themeMode.asStateFlow()
 
     fun setThemeMode(mode: String) {
-        viewModelScope.launch {
+        launchSafe {
+            val userKey = getActiveUserKey()
+            val email = userProfile.value?.email
             val appPrefs = com.example.utils.AppPreferences(getApplication())
-            appPrefs.themeMode = mode
+            appPrefs.setThemeModeForUser(userKey, mode)
+            if (!email.isNullOrBlank()) {
+                appPrefs.setThemeModeForUser(email, mode)
+            }
             _themeMode.value = mode
-            when (mode) {
-                "LIGHT" -> {
-                    appPrefs.isDarkMode = false
-                    repository.updateThemePreference(false)
-                }
-                "DARK" -> {
-                    appPrefs.isDarkMode = true
-                    repository.updateThemePreference(true)
-                }
+            val isDark = when (mode) {
+                "DARK" -> true
+                "LIGHT" -> false
                 else -> {
                     val isSystemDark = (getApplication<Application>().resources.configuration.uiMode and
                             android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
-                    appPrefs.isDarkMode = isSystemDark
-                    repository.updateThemePreference(isSystemDark)
+                    isSystemDark
                 }
             }
+            appPrefs.setDarkModeForUser(userKey, isDark)
+            if (!email.isNullOrBlank()) {
+                appPrefs.setDarkModeForUser(email, isDark)
+            }
+            repository.updateThemePreference(isDark)
         }
     }
 
     // App Lock Auto-lock Timeout StateFlow
     private val _appLockTimeoutSeconds = MutableStateFlow(
-        com.example.utils.AppPreferences(application).appLockTimeoutSeconds
+        com.example.utils.AppPreferences(application).getAppLockTimeoutForUser(com.example.data.local.AppDatabase.getActiveUserKey())
     )
     val appLockTimeoutSeconds: StateFlow<Int> = _appLockTimeoutSeconds.asStateFlow()
 
     fun setBiometricLock(enabled: Boolean) {
-        viewModelScope.launch {
+        launchSafe {
             val email = userProfile.value?.email
-            com.example.utils.AppPreferences(getApplication()).setBiometricEnabledForUser(email, enabled)
+            val userKey = getActiveUserKey()
+            val appPrefs = com.example.utils.AppPreferences(getApplication())
+            appPrefs.setBiometricEnabledForUser(userKey, enabled)
+            if (!email.isNullOrBlank()) {
+                appPrefs.setBiometricEnabledForUser(email, enabled)
+            }
             repository.updateBiometricPreference(enabled)
             showMessage(if (enabled) "App Lock enabled" else "App Lock disabled")
         }
@@ -309,9 +381,14 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
 
     fun setAppLockTimeout(seconds: Int) {
         _appLockTimeoutSeconds.value = seconds
-        viewModelScope.launch {
+        launchSafe {
+            val userKey = getActiveUserKey()
             val email = userProfile.value?.email
-            com.example.utils.AppPreferences(getApplication()).setAppLockTimeoutForUser(email, seconds)
+            val appPrefs = com.example.utils.AppPreferences(getApplication())
+            appPrefs.setAppLockTimeoutForUser(userKey, seconds)
+            if (!email.isNullOrBlank()) {
+                appPrefs.setAppLockTimeoutForUser(email, seconds)
+            }
             val label = when (seconds) {
                 0 -> "Immediately"
                 30 -> "After 30 seconds"
@@ -328,40 +405,71 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private val _isHapticFeedbackEnabled = MutableStateFlow(
-        com.example.utils.AppPreferences(application).isHapticFeedbackEnabled
+        com.example.utils.AppPreferences(application).isHapticFeedbackEnabledForUser(com.example.data.local.AppDatabase.getActiveUserKey())
     )
     val isHapticFeedbackEnabled: StateFlow<Boolean> = _isHapticFeedbackEnabled.asStateFlow()
 
     fun setHapticFeedbackEnabled(enabled: Boolean) {
         _isHapticFeedbackEnabled.value = enabled
-        viewModelScope.launch {
-            com.example.utils.AppPreferences(getApplication()).isHapticFeedbackEnabled = enabled
+        launchSafe {
+            val userKey = getActiveUserKey()
+            val email = userProfile.value?.email
+            val appPrefs = com.example.utils.AppPreferences(getApplication())
+            appPrefs.setHapticFeedbackEnabledForUser(userKey, enabled)
+            if (!email.isNullOrBlank()) {
+                appPrefs.setHapticFeedbackEnabledForUser(email, enabled)
+            }
             showMessage(if (enabled) "Haptic feedback enabled" else "Haptic feedback disabled")
         }
     }
 
     private val _isFloatingEffectEnabled = MutableStateFlow(
-        com.example.utils.AppPreferences(application).isFloatingEffectEnabled
+        com.example.utils.AppPreferences(application).isFloatingEffectEnabledForUser(com.example.data.local.AppDatabase.getActiveUserKey())
     )
     val isFloatingEffectEnabled: StateFlow<Boolean> = _isFloatingEffectEnabled.asStateFlow()
 
     fun setFloatingEffectEnabled(enabled: Boolean) {
         _isFloatingEffectEnabled.value = enabled
-        viewModelScope.launch {
-            com.example.utils.AppPreferences(getApplication()).isFloatingEffectEnabled = enabled
+        launchSafe {
+            val userKey = getActiveUserKey()
+            val email = userProfile.value?.email
+            val appPrefs = com.example.utils.AppPreferences(getApplication())
+            appPrefs.setFloatingEffectEnabledForUser(userKey, enabled)
+            if (!email.isNullOrBlank()) {
+                appPrefs.setFloatingEffectEnabledForUser(email, enabled)
+            }
             showMessage(if (enabled) "Floating depth effect enabled" else "Floating depth effect disabled")
         }
     }
 
-    fun updateDashboardCardsConfig(config: String) {
-        viewModelScope.launch {
-            try {
-                repository.updateDashboardCardsConfig(config)
-            } catch (e: Exception) {
-                if (com.example.BuildConfig.DEBUG) {
-                    android.util.Log.e("FinanceViewModel", "Failed to update dashboard config", e)
-                }
+    private val _refreshRateMode = MutableStateFlow(
+        com.example.utils.AppPreferences(application).getRefreshRateModeForUser(com.example.data.local.AppDatabase.getActiveUserKey())
+    )
+    val refreshRateMode: StateFlow<String> = _refreshRateMode.asStateFlow()
+
+    fun setRefreshRateMode(mode: String) {
+        _refreshRateMode.value = mode
+        launchSafe {
+            val userKey = getActiveUserKey()
+            val email = userProfile.value?.email
+            val appPrefs = com.example.utils.AppPreferences(getApplication())
+            appPrefs.setRefreshRateModeForUser(userKey, mode)
+            if (!email.isNullOrBlank()) {
+                appPrefs.setRefreshRateModeForUser(email, mode)
             }
+            val targetEnum = try {
+                com.example.utils.RefreshRateMode.valueOf(mode)
+            } catch (_: Throwable) {
+                com.example.utils.RefreshRateMode.ADAPTIVE
+            }
+            com.example.utils.AdaptiveRefreshRateManager.setMode(targetEnum)
+            showMessage("Refresh rate set to ${targetEnum.displayName}")
+        }
+    }
+
+    fun updateDashboardCardsConfig(config: String) {
+        launchSafe {
+            repository.updateDashboardCardsConfig(config)
         }
     }
 
@@ -632,7 +740,18 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
                     tx.referenceNumber.contains(params.query, ignoreCase = true) ||
                     (tx.advanceId != null && tx.advanceId.contains(params.query, ignoreCase = true))
             val matchesType = params.typeFilter == null || tx.transactionType == params.typeFilter
-            val matchesCat = params.catFilter == null || tx.categoryName.equals(params.catFilter, ignoreCase = true)
+            val matchesCat = when {
+                params.catFilter == null -> true
+                params.catFilter.equals("Uncategorized", ignoreCase = true) -> {
+                    tx.categoryName.isNullOrBlank() ||
+                    tx.categoryName.equals("Uncategorized", ignoreCase = true) ||
+                    tx.categoryId == null
+                }
+                else -> {
+                    tx.categoryName.split(",")
+                        .any { it.trim().equals(params.catFilter, ignoreCase = true) }
+                }
+            }
             val matchesAcc = if (isFilteringCash) {
                 isCashTransaction(tx)
             } else {
@@ -658,6 +777,27 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
 
     // Consolidated Sequential Initialization
     init {
+        viewModelScope.launch {
+            userProfile.collect { profile ->
+                if (profile != null) {
+                    val userKey = com.example.data.local.AppDatabase.sanitizeUserKey(profile.email)
+                    val appPrefs = com.example.utils.AppPreferences(getApplication())
+                    _themeMode.value = appPrefs.getThemeModeForUser(userKey)
+                    _isHapticFeedbackEnabled.value = appPrefs.isHapticFeedbackEnabledForUser(userKey)
+                    _isFloatingEffectEnabled.value = appPrefs.isFloatingEffectEnabledForUser(userKey)
+                    _refreshRateMode.value = appPrefs.getRefreshRateModeForUser(userKey)
+                    try {
+                        com.example.utils.AdaptiveRefreshRateManager.setMode(
+                            com.example.utils.RefreshRateMode.valueOf(_refreshRateMode.value)
+                        )
+                    } catch (_: Throwable) {
+                        com.example.utils.AdaptiveRefreshRateManager.setMode(com.example.utils.RefreshRateMode.ADAPTIVE)
+                    }
+                    _appLockTimeoutSeconds.value = appPrefs.getAppLockTimeoutForUser(userKey)
+                }
+            }
+        }
+
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 // Yield coroutine to let initial UI frame render smoothly without blocking

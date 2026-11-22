@@ -373,6 +373,7 @@ fun OnboardingScreen(
                                                 privacyBlurEnabled = isPrivacyBlurEnabled,
                                                 timeoutSeconds = blurTimeoutSeconds
                                             )
+                                            appPreferences.setThemeModeForUser(finalEmail, selectedThemeMode)
                                             appPreferences.isLoggedOut = false
                                             appPreferences.lastUserName = confirmedAccountName
                                             appPreferences.lastUserEmail = finalEmail
@@ -1329,6 +1330,7 @@ fun OnboardingScreen(
     }
 
     if (showSwitchAccountDialog) {
+        val biometricAuthManager = remember { BiometricAuthManager(context) }
         AlertDialog(
             onDismissRequest = { showSwitchAccountDialog = false },
             title = {
@@ -1373,21 +1375,49 @@ fun OnboardingScreen(
                             val isTargetOffline = acc.email.isBlank() ||
                                 acc.email.equals("offline", ignoreCase = true) ||
                                 acc.email.equals("guest", ignoreCase = true)
+                            val isTargetBioEnabled = appPreferences.isBiometricEnabledForUser(acc.email)
+                            val targetName = acc.name.ifBlank { if (isTargetOffline) "Offline Profile" else "User" }
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
                                         HapticHelper.vibrateClick(context)
-                                        showSwitchAccountDialog = false
-                                        authViewModel.switchAccount(acc.email) {
-                                            val userKey = if (isTargetOffline) "guest" else com.example.data.local.AppDatabase.sanitizeUserKey(acc.email)
-                                            appPreferences.isLoggedOut = false
-                                            appPreferences.setLoggedOutForUser(acc.email, false)
-                                            appPreferences.setOnboardingCompletedForUser(userKey, true)
-                                            appPreferences.isOnboardingCompleted = true
-                                            financeViewModel.recalculateAllAccountBalances()
-                                            authViewModel.completeOnboarding(acc.name.ifBlank { "User" })
-                                            onComplete()
+                                        val fragmentActivity = context.findFragmentActivity()
+
+                                        val performSwitch = {
+                                            showSwitchAccountDialog = false
+                                            authViewModel.switchAccount(acc.email) {
+                                                val userKey = if (isTargetOffline) "guest" else com.example.data.local.AppDatabase.sanitizeUserKey(acc.email)
+                                                appPreferences.isLoggedOut = false
+                                                appPreferences.setLoggedOutForUser(acc.email, false)
+                                                appPreferences.setOnboardingCompletedForUser(userKey, true)
+                                                appPreferences.isOnboardingCompleted = true
+                                                financeViewModel.recalculateAllAccountBalances()
+                                                authViewModel.completeOnboarding(acc.name.ifBlank { "User" })
+                                                onComplete()
+                                            }
+                                        }
+
+                                        if (isTargetBioEnabled && biometricAuthManager.isBiometricAvailable() && fragmentActivity != null) {
+                                            biometricAuthManager.authenticateBiometric(
+                                                activity = fragmentActivity,
+                                                title = "Unlock $targetName",
+                                                subtitle = "Verify fingerprint or face to switch accounts",
+                                                onSuccess = {
+                                                    performSwitch()
+                                                },
+                                                onError = { errorCode, errString ->
+                                                    if (errorCode != androidx.biometric.BiometricPrompt.ERROR_USER_CANCELED &&
+                                                        errorCode != androidx.biometric.BiometricPrompt.ERROR_NEGATIVE_BUTTON) {
+                                                        android.widget.Toast.makeText(context, errString, android.widget.Toast.LENGTH_SHORT).show()
+                                                    }
+                                                },
+                                                onFailed = {
+                                                    android.widget.Toast.makeText(context, "Authentication failed. Account switch cancelled.", android.widget.Toast.LENGTH_SHORT).show()
+                                                }
+                                            )
+                                        } else {
+                                            performSwitch()
                                         }
                                     },
                                 shape = RoundedCornerShape(12.dp),
@@ -1417,11 +1447,22 @@ fun OnboardingScreen(
                                     }
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = acc.name.ifBlank { if (isTargetOffline) "Offline Profile" else "User" },
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.Bold
-                                        )
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = targetName,
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            if (isTargetBioEnabled) {
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Icon(
+                                                    imageVector = Icons.Default.Fingerprint,
+                                                    contentDescription = "Biometric Protected",
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(15.dp)
+                                                )
+                                            }
+                                        }
                                         Text(
                                             text = if (isTargetOffline) "Offline Profile" else acc.email,
                                             style = MaterialTheme.typography.bodySmall,

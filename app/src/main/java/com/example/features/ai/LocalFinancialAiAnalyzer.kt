@@ -11,52 +11,51 @@ object LocalFinancialAiAnalyzer {
 
     const val OUT_OF_SCOPE_RESPONSE = "Please ask questions related to this application only."
 
-    private val INJECTION_PATTERNS = listOf(
-        "ignore previous",
-        "ignore all previous",
-        "disregard",
-        "override",
-        "system prompt",
-        "reveal your prompt",
-        "show your instructions",
-        "what are your instructions",
-        "you are now",
-        "act as",
-        "roleplay as",
-        "dan mode",
-        "developer mode",
-        "jailbreak",
-        "bypass",
-        "forget your rules",
-        "forget all rules",
-        "new instructions",
-        "secret instructions",
-        "hidden prompt"
+    private val INJECTION_REGEXES = listOf(
+        Regex("""(?i)\b(?:ignore|disregard|forget|bypass|override)\s+(?:all\s+)?(?:previous|prior|above|existing|system)?\s*(?:instructions|prompts|rules|directives|constraints|guardrails)\b"""),
+        Regex("""(?i)\b(?:bypass|override|disable)\s+(?:the\s+)?(?:safety|security|system|restrictions|filter|rules|guardrails)\b"""),
+        Regex("""(?i)\b(?:reveal|show|print|display|give\s*me|repeat|what\s*(?:are|is))\s+(?:your\s+)?(?:secret\s+|hidden\s+|system\s+)?(?:instructions|prompt|rules|developer\s+mode)\b"""),
+        Regex("""(?i)\b(?:dan\s+mode|jailbreak|developer\s+mode|unrestricted\s+mode)\b"""),
+        Regex("""(?i)\b(?:you\s+are\s+now|roleplay\s+as)\s+(?:unrestricted|evil|dan|developer|jailbroken|god\s+mode)\b"""),
+        Regex("""(?i)\bact\s+as\s+(?:dan|an?\s+unrestricted|an?\s+evil|a\s+jailbroken|god\s+mode)\b"""),
+        Regex("""(?i)\b(?:system\s+prompt|secret\s+instructions|hidden\s+prompt)\b""")
     )
 
     fun isPromptInjection(query: String): Boolean {
-        val lower = query.lowercase().trim()
-        return INJECTION_PATTERNS.any { lower.contains(it) }
+        if (query.isBlank()) return false
+        return INJECTION_REGEXES.any { it.containsMatchIn(query) }
+    }
+
+    private val APP_KEYWORDS = listOf(
+        "yosan", "app", "application", "setting", "settings", "preference", "preferences",
+        "feature", "features", "account", "accounts", "bank", "banks", "balance", "balances",
+        "net worth", "money", "cash", "in-hand", "hand cash", "income", "incomes", "salary",
+        "expense", "expenses", "spend", "spent", "spending", "transaction", "transactions",
+        "transfer", "transfers", "category", "categories", "budget", "budgets", "save", "saving",
+        "savings", "lend", "lending", "borrow", "borrowing", "loan", "loans", "debt", "debts",
+        "due", "dues", "repay", "repayment", "repayments", "owe", "owes", "owed", "claim",
+        "claims", "official", "company", "reimbursement", "reimbursements", "advance", "advances",
+        "statement", "statements", "upload", "uploads", "excel", "pdf", "report", "reports",
+        "summary", "summaries", "drive", "backup", "backups", "restore", "restoration", "sync",
+        "security", "privacy", "blur", "biometric", "theme", "rule", "rules", "history",
+        "audit", "card", "cards", "wallet", "credit", "debit", "upi", "hi", "hello", "hey",
+        "help", "who are you", "what can you do", "thanks", "thank you", "financial", "finance",
+        "invest", "investment", "investments", "investing", "mutual fund", "mutual funds", "sip",
+        "stocks", "equity", "debt fund", "fixed deposit", "recurring deposit", "gold", "epf", "ppf",
+        "nps", "tax", "taxes", "taxation", "deduction", "deductions", "inflation", "asset", "assets",
+        "liability", "liabilities", "portfolio", "wealth", "fund", "funds", "emergency fund",
+        "retirement", "pension", "interest", "emi", "interest rate", "compound interest",
+        "dividend", "dividends", "crypto", "insurance", "term insurance", "health insurance",
+        "liquidity", "liquid", "cashflow", "cash flow", "payment", "payments", "pay", "paid"
+    )
+
+    private val APP_KEYWORD_REGEXES = APP_KEYWORDS.map {
+        Regex("""(?i)\b${Regex.escape(it)}\b""")
     }
 
     fun isApplicationRelated(query: String): Boolean {
-        val lower = query.lowercase().trim()
-        val appKeywords = listOf(
-            "yosan", "app", "application", "setting", "settings", "preference", "preferences",
-            "feature", "features", "account", "accounts", "bank", "banks", "balance", "balances",
-            "net worth", "money", "cash", "in-hand", "hand cash", "income", "incomes", "salary",
-            "expense", "expenses", "spend", "spent", "spending", "transaction", "transactions",
-            "transfer", "transfers", "category", "categories", "budget", "budgets", "save", "saving",
-            "savings", "lend", "lending", "borrow", "borrowing", "loan", "loans", "debt", "debts",
-            "due", "dues", "repay", "repayment", "repayments", "owe", "owes", "owed", "claim",
-            "claims", "official", "company", "reimbursement", "reimbursements", "advance", "advances",
-            "statement", "statements", "upload", "uploads", "excel", "pdf", "report", "reports",
-            "summary", "summaries", "drive", "backup", "backups", "restore", "restoration", "sync",
-            "security", "privacy", "blur", "biometric", "theme", "rule", "rules", "history",
-            "audit", "card", "cards", "wallet", "credit", "debit", "upi", "hi", "hello", "hey",
-            "help", "who are you", "what can you do", "thanks", "thank you", "financial", "finance"
-        )
-        return appKeywords.any { lower.contains(it) }
+        if (query.isBlank()) return false
+        return APP_KEYWORD_REGEXES.any { it.containsMatchIn(query) }
     }
 
     fun generateResponse(userMessage: String, viewModel: FinanceViewModel?): String {
@@ -579,12 +578,7 @@ object LocalFinancialAiAnalyzer {
             }
         }
 
-        // 10. Default / Comprehensive Monthly Breakdown (Only if query is asking for summary/finances/breakdown)
-        val isFinancialGeneralQuery = listOf("summary", "breakdown", "overview", "snapshot", "status", "report", "how am i doing", "financial", "money", "savings", "budget", "all").any { msgLower.contains(it) }
-        if (!isFinancialGeneralQuery) {
-            return OUT_OF_SCOPE_RESPONSE
-        }
-
+        // 10. Default / Comprehensive Monthly Breakdown & Financial Snapshot
         val summary = viewModel?.dashboardSummary?.value
         val totalIncome = summary?.totalIncome ?: allIncomes.sumOf { if (it.creditAmount > 0.0) it.creditAmount else it.amount }
         val totalExpense = summary?.totalExpense ?: allExpenses.sumOf { if (it.debitAmount > 0.0) it.debitAmount else it.amount }

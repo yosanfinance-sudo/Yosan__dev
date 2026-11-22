@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.remote.ApiClient
 import com.example.data.remote.ChatMessageDto
+import com.example.utils.SecureTokenManager
 import com.example.data.remote.ChatRequest
 import com.example.ui.components.MarkdownContent
 import kotlinx.coroutines.launch
@@ -63,17 +64,39 @@ fun FinancialChatSheet(
     val listState = rememberLazyListState()
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    val initialGreeting = remember {
-        UiChatMessage(
-            role = "model",
-            text = """
-                👋 **Hello! I am your Yosan AI Financial Advisor.**
+    val appPrefs = remember { com.example.utils.AppPreferences(context) }
+    val tokenManager = remember { com.example.utils.SecureTokenManager(context) }
+    val userEmail = viewModel?.userProfile?.value?.email ?: appPrefs.lastUserEmail
+    val userGeminiKey = appPrefs.getGeminiApiKeyForUser(userEmail).ifBlank { appPrefs.geminiApiKey }
+    val googleSub = tokenManager.getGoogleSub() ?: ""
+    val isGoogleAccount = googleSub.isNotBlank() && !googleSub.startsWith("local_") && !googleSub.startsWith("email_") && !googleSub.startsWith("otp_") && !googleSub.startsWith("user_")
+    val isGoogleOptedIn = isGoogleAccount || userGeminiKey.isNotBlank()
 
-                Ask me anything about your finances, category spending, loans, or savings goals. All breakdowns are formatted strictly in clear tables!
+    val initialGreeting = remember(isGoogleOptedIn) {
+        if (isGoogleOptedIn) {
+            UiChatMessage(
+                role = "model",
+                text = """
+                    👋 **Hello! I am your Yosan AI Financial Advisor.**
 
-                Tap one of the suggestions below or type your question.
-            """.trimIndent()
-        )
+                    Ask me anything about your finances, category spending, loans, or savings goals. All breakdowns are formatted strictly in clear tables!
+
+                    Tap one of the suggestions below or type your question.
+                """.trimIndent()
+            )
+        } else {
+            UiChatMessage(
+                role = "model",
+                text = """
+                    🔒 **Google Opt-In Required**
+
+                    AI Financial Assistant features are powered by Google Gemini and require you to opt into Google services.
+
+                    Please sign in with Google or configure your Google Gemini API key in Settings to activate AI assistance.
+                """.trimIndent(),
+                isError = true
+            )
+        }
     }
 
     var messages by remember { mutableStateOf(listOf(initialGreeting)) }
@@ -91,6 +114,15 @@ fun FinancialChatSheet(
     fun sendMessage(userText: String) {
         val trimmed = userText.trim()
         if (trimmed.isEmpty() || isLoading) return
+
+        if (!isGoogleOptedIn) {
+            messages = messages + UiChatMessage(
+                role = "model",
+                text = "🔒 **AI Features Disabled**: Please opt into Google services (by signing in with Google or configuring your Google Gemini API Key in Settings) to use the AI Financial Advisor.",
+                isError = true
+            )
+            return
+        }
 
         val userMsg = UiChatMessage(role = "user", text = trimmed)
         messages = messages + userMsg
@@ -403,7 +435,7 @@ fun FinancialChatSheet(
                     SuggestionChip(
                         onClick = { sendMessage(suggestion) },
                         label = { Text(suggestion, style = MaterialTheme.typography.labelMedium) },
-                        enabled = !isLoading
+                        enabled = isGoogleOptedIn && !isLoading
                     )
                 }
             }
@@ -426,9 +458,10 @@ fun FinancialChatSheet(
                     TextField(
                         value = inputText,
                         onValueChange = { inputText = it },
+                        enabled = isGoogleOptedIn && !isLoading,
                         placeholder = {
                             Text(
-                                "Ask about expenses, loans, or savings...",
+                                if (isGoogleOptedIn) "Ask about expenses, loans, or savings..." else "Google opt-in required to use AI features...",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -449,11 +482,11 @@ fun FinancialChatSheet(
 
                     IconButton(
                         onClick = { sendMessage(inputText) },
-                        enabled = inputText.trim().isNotEmpty() && !isLoading,
+                        enabled = isGoogleOptedIn && inputText.trim().isNotEmpty() && !isLoading,
                         modifier = Modifier
                             .size(40.dp)
                             .background(
-                                color = if (inputText.trim().isNotEmpty() && !isLoading)
+                                color = if (isGoogleOptedIn && inputText.trim().isNotEmpty() && !isLoading)
                                     MaterialTheme.colorScheme.primary
                                 else
                                     MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),

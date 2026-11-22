@@ -72,7 +72,7 @@ val WALKTHROUGH_MODULES = listOf(
                     "2. Reconcile: Review parsed transactions and verify the closing balance matches your bank.",
                     "3. Dashboard: Explore real-time Net Worth, bank cards, in-hand cash, and monthly cash flow.",
                     "4. Fast Categorize: Tag unclassified records and save auto-rules for future statement imports.",
-                    "5. Statement Ledger: Browse full history and filter via Flipkart-style 2-column filter drawer.",
+                    "5. Statement Ledger: Browse full history and filter via smart 2-column filter drawer.",
                     "6. Manual Cash & Advances: Use (+) to log cash spends, peer loans (#LEND), and advances (#ADV).",
                     "7. Official Expenses: Track claims and map incoming reimbursement credits directly to expenses.",
                     "8. Reports: Generate filtered overall summaries and export high-resolution PDF statements.",
