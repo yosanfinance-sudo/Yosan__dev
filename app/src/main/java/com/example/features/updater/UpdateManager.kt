@@ -43,7 +43,7 @@ sealed class UpdateUiState {
 
 class UpdateManager(
     private val context: Context,
-    private val repoOwner: String = "ROOPARAJB",
+    private val repoOwner: String = "yosanfinance-sudo",
     private val repoName: String = "Yosan"
 ) {
     private val client = OkHttpClient.Builder()
