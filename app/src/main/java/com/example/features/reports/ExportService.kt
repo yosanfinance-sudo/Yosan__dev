@@ -93,7 +93,7 @@ object ExportService {
 
     fun exportTransactionsCsv(transactions: List<TransactionEntity>): String {
         val sb = StringBuilder()
-        sb.append("Date,Description,Debit Amount,Credit Amount,Total Amount,Type,Category,Balance,Reference\n")
+        sb.append("Date,Description,Debit Amount,Credit Amount,Total Amount,Type,Category,Subcategory,Balance,Reference\n")
         transactions.forEach { tx ->
             sb.append("\"${tx.transactionDate}\",")
             sb.append("\"${tx.description.replace("\"", "\"\"")}\",")
@@ -102,6 +102,7 @@ object ExportService {
             sb.append("${tx.amount},")
             sb.append("\"${tx.transactionType}\",")
             sb.append("\"${tx.categoryName}\",")
+            sb.append("\"${tx.subcategoryName.orEmpty()}\",")
             sb.append("${tx.balanceAfterTransaction ?: ""},")
             sb.append("\"${tx.referenceNumber}\"\n")
         }
@@ -267,6 +268,9 @@ object ExportService {
             sb.append("--- 3. INCOME CATEGORY BREAKDOWN ---\n")
             categoryIncomeBreakdown.forEach { item ->
                 sb.append(String.format("%-24s: %12s (%5.1f%%)\n", item.categoryName, CurrencyFormatter.formatInr(item.amount), item.percentage))
+                item.subcategories.forEach { sub ->
+                    sb.append(String.format("   ↳ %-20s: %12s (%5.1f%%)\n", sub.subcategoryName, CurrencyFormatter.formatInr(sub.amount), sub.percentage))
+                }
             }
             sb.append("\n")
         }
@@ -275,6 +279,9 @@ object ExportService {
             sb.append("--- 4. EXPENSE CATEGORY BREAKDOWN ---\n")
             categoryExpenseBreakdown.forEach { item ->
                 sb.append(String.format("%-24s: %12s (%5.1f%%)\n", item.categoryName, CurrencyFormatter.formatInr(item.amount), item.percentage))
+                item.subcategories.forEach { sub ->
+                    sb.append(String.format("   ↳ %-20s: %12s (%5.1f%%)\n", sub.subcategoryName, CurrencyFormatter.formatInr(sub.amount), sub.percentage))
+                }
             }
             sb.append("\n")
         }
@@ -596,7 +603,8 @@ object ExportService {
                     // 2. Personal Expense Categories
                     canvas.drawText("Personal Expense Category Breakdown (${categoryExpenseBreakdown.size})", 30f, currentY, sectionTitlePaint)
                     val expenseCats = categoryExpenseBreakdown.take(18)
-                    val expenseH = (expenseCats.size.coerceAtLeast(1) * 20f + 48f).coerceAtLeast(70f)
+                    val totalLines = expenseCats.sumOf { 1 + it.subcategories.take(2).size }
+                    val expenseH = (totalLines.coerceAtLeast(1) * 20f + 48f).coerceAtLeast(70f)
                     val expenseB = currentY + 8f + expenseH
                     canvas.drawRoundRect(30f, currentY + 8f, 565f, expenseB, 10f, 10f, cardBgPaint)
                     canvas.drawRoundRect(30f, currentY + 8f, 565f, expenseB, 10f, 10f, cardBorderPaint)
@@ -614,7 +622,7 @@ object ExportService {
                         canvas.drawText("No categorized expenses recorded.", 45f, y, textPaint)
                     } else {
                         expenseCats.forEach { item ->
-                            textPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+                            textPaint.typeface = Typeface.create("sans-serif", Typeface.BOLD)
                             canvas.drawText(item.categoryName, 45f, y, textPaint)
                             val pctStr = "${String.format(java.util.Locale.ENGLISH, "%.1f", item.percentage)}% (${item.count})"
                             canvas.drawText(pctStr, 280f, y, textPaint)
@@ -623,6 +631,17 @@ object ExportService {
                             val width = negativePaint.measureText(valStr)
                             canvas.drawText(valStr, 550f - width, y, negativePaint)
                             y += 19f
+
+                            item.subcategories.take(2).forEach { sub ->
+                                textPaint.typeface = Typeface.create("sans-serif", Typeface.ITALIC)
+                                canvas.drawText("  ↳ ${sub.subcategoryName}", 55f, y, textPaint)
+                                val subPctStr = "${String.format(java.util.Locale.ENGLISH, "%.1f", sub.percentage)}% (${sub.count})"
+                                canvas.drawText(subPctStr, 280f, y, textPaint)
+                                val subValStr = formatInr(sub.amount)
+                                negativePaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+                                canvas.drawText(subValStr, 550f - negativePaint.measureText(subValStr), y, negativePaint)
+                                y += 19f
+                            }
                         }
                     }
 
@@ -1030,14 +1049,15 @@ object ExportService {
                         textPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
                         canvas.drawText("No categorized expenses recorded for this period.", 45f, currentY + 20f, textPaint)
                     } else {
-                        val tableH = (categoryExpenseBreakdown.size * 20f + 36f).coerceAtLeast(60f)
+                        val totalRows = categoryExpenseBreakdown.sumOf { 1 + it.subcategories.size }
+                        val tableH = (totalRows * 20f + 36f).coerceAtLeast(60f)
                         val tableB = currentY + 8f + tableH
                         canvas.drawRoundRect(30f, currentY + 8f, 565f, tableB, 10f, 10f, cardBgPaint)
                         canvas.drawRoundRect(30f, currentY + 8f, 565f, tableB, 10f, 10f, cardBorderPaint)
 
                         val hdrY = currentY + 26f
                         textPaint.typeface = Typeface.create("sans-serif", Typeface.BOLD)
-                        canvas.drawText("Category Name", 45f, hdrY, textPaint)
+                        canvas.drawText("Category / Subcategory", 45f, hdrY, textPaint)
                         canvas.drawText("Share (%)", 280f, hdrY, textPaint)
                         canvas.drawText("Txn Count", 390f, hdrY, textPaint)
                         canvas.drawText("Total Outflow", 475f, hdrY, textPaint)
@@ -1045,7 +1065,7 @@ object ExportService {
 
                         var rowY = hdrY + 18f
                         categoryExpenseBreakdown.forEach { item ->
-                            textPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+                            textPaint.typeface = Typeface.create("sans-serif", Typeface.BOLD)
                             canvas.drawText(item.categoryName, 45f, rowY, textPaint)
                             canvas.drawText("${String.format(java.util.Locale.ENGLISH, "%.1f", item.percentage)}%", 280f, rowY, textPaint)
                             canvas.drawText("${item.count}", 390f, rowY, textPaint)
@@ -1053,6 +1073,17 @@ object ExportService {
                             negativePaint.typeface = Typeface.create("sans-serif", Typeface.BOLD)
                             canvas.drawText(valStr, 550f - negativePaint.measureText(valStr), rowY, negativePaint)
                             rowY += 20f
+
+                            item.subcategories.forEach { sub ->
+                                textPaint.typeface = Typeface.create("sans-serif", Typeface.ITALIC)
+                                canvas.drawText("  ↳ ${sub.subcategoryName}", 55f, rowY, textPaint)
+                                canvas.drawText("${String.format(java.util.Locale.ENGLISH, "%.1f", sub.percentage)}%", 280f, rowY, textPaint)
+                                canvas.drawText("${sub.count}", 390f, rowY, textPaint)
+                                val subValStr = formatInr(sub.amount)
+                                negativePaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+                                canvas.drawText(subValStr, 550f - negativePaint.measureText(subValStr), rowY, negativePaint)
+                                rowY += 20f
+                            }
                         }
                     }
                 }

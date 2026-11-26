@@ -24,6 +24,7 @@ import com.google.android.gms.common.api.ApiException
 import com.example.features.sync.StorageMode
 import com.example.features.sync.SyncState
 import com.example.features.sync.SyncStatusInfo
+import com.example.features.messages.MessageIngestionManager
 import com.example.utils.AppPreferences
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -106,6 +107,7 @@ fun SettingsScreen(
     onNavigateToImport: () -> Unit,
     onNavigateToLending: () -> Unit = {},
     onNavigateToExcelSync: () -> Unit = {},
+    onNavigateToBudget: () -> Unit = {},
     onOpenProductTour: () -> Unit = {},
     onOpenWalkthrough: () -> Unit = {},
     onOpenIntroNote: () -> Unit = {},
@@ -194,6 +196,31 @@ fun SettingsScreen(
     var targetRestoreVersion by remember { mutableStateOf<Int?>(null) }
     var targetRestoreFileId by remember { mutableStateOf<String?>(null) }
     var isRestoringVersion by remember { mutableStateOf(false) }
+
+    val settingsPrefs = remember { AppPreferences(context) }
+    var isMessageTrackingEnabled by remember { mutableStateOf(settingsPrefs.isMessageTrackingEnabled) }
+    var trackingMode by remember { mutableStateOf(settingsPrefs.messageTrackingMode) }
+    var showTrackingModeDialog by remember { mutableStateOf(false) }
+    var showNotifPermissionDialog by remember { mutableStateOf(false) }
+    var isScanningSms by remember { mutableStateOf(false) }
+
+    val smsPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { perms ->
+        val granted = perms[android.Manifest.permission.READ_SMS] == true
+        if (granted) {
+            isScanningSms = true
+            isMessageTrackingEnabled = true
+            settingsPrefs.isMessageTrackingEnabled = true
+            coroutineScope.launch {
+                val count = MessageIngestionManager.scanSmsInbox(context, 30)
+                isScanningSms = false
+                statusNotificationMsg = "SMS scan complete: Found $count transactions awaiting your approval!"
+            }
+        } else {
+            statusNotificationMsg = "SMS permission was not granted. Please allow SMS permission in Android App Info."
+        }
+    }
 
     val driveAuthManager = remember { GoogleDriveAuthManager(context) }
     var pendingConsentEmail by remember { mutableStateOf<String?>(null) }
@@ -621,6 +648,16 @@ fun SettingsScreen(
                         onClick = { showAccountsDialog = true }
                     )
                     AppleDivider()
+                    val parentCatCount = remember(categories) { categories.count { it.parentCategoryId == null } }
+                    val subCatCount = remember(categories) { categories.count { it.parentCategoryId != null } }
+                    AppleSettingsRow(
+                        title = "Categories & Subcategories",
+                        icon = Icons.Default.Category,
+                        iconBgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                        valueText = "$parentCatCount Categories • $subCatCount Sub",
+                        onClick = { showCategoryDialog = true }
+                    )
+                    AppleDivider()
                     AppleSettingsRow(
                         title = "Categorization Rules",
                         icon = Icons.Default.AutoAwesome,
@@ -630,12 +667,117 @@ fun SettingsScreen(
                     )
                     AppleDivider()
                     AppleSettingsRow(
+                        title = "Monthly Budget Planner",
+                        icon = Icons.Default.PieChart,
+                        iconBgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                        valueText = "Targets & Limits",
+                        onClick = onNavigateToBudget
+                    )
+                    AppleDivider()
+                    AppleSettingsRow(
                         title = "Undo & Action History",
                         icon = Icons.Default.History,
                         iconBgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
                         valueText = "${undoHistory.size} Actions",
                         onClick = { showUndoHistorySheet = true }
                     )
+                }
+            }
+
+            item {
+                AppleSettingsGroup(
+                    title = "Auto Statement Tracking",
+                    footer = "Captures financial transactions from bank SMS and push notifications (Google Pay, PhonePe, Paytm, CRED). All data is processed 100% locally on your device and requires your approval before being added to your statement."
+                ) {
+                    AppleSettingsRow(
+                        title = "Enable Auto Tracking",
+                        icon = Icons.Default.Sms,
+                        iconBgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                        showChevron = false,
+                        trailing = {
+                            Switch(
+                                checked = isMessageTrackingEnabled,
+                                onCheckedChange = { enabled ->
+                                    isMessageTrackingEnabled = enabled
+                                    settingsPrefs.isMessageTrackingEnabled = enabled
+                                }
+                            )
+                        }
+                    )
+                    if (isMessageTrackingEnabled) {
+                        AppleDivider()
+                        val modeLabel = when (trackingMode) {
+                            "SMS_ONLY" -> "Approach A (SMS Only)"
+                            "NOTIFICATIONS_ONLY" -> "Approach B (Notifications)"
+                            else -> "Both (SMS & Notifications)"
+                        }
+                        AppleSettingsRow(
+                            title = "Tracking Mode",
+                            icon = Icons.Default.Tune,
+                            iconBgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                            valueText = modeLabel,
+                            onClick = { showTrackingModeDialog = true }
+                        )
+                        if (trackingMode != "SMS_ONLY") {
+                            AppleDivider()
+                            val enabledListeners = android.provider.Settings.Secure.getString(
+                                context.contentResolver,
+                                "enabled_notification_listeners"
+                            )
+                            val isNotifListenerActive = enabledListeners?.contains(context.packageName) == true
+                            AppleSettingsRow(
+                                title = "Notification Access",
+                                icon = Icons.Default.NotificationsActive,
+                                iconBgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                                valueText = if (isNotifListenerActive) "Active" else "Grant Permission",
+                                onClick = {
+                                    if (isNotifListenerActive) {
+                                        try {
+                                            context.startActivity(Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                                        } catch (_: Exception) {
+                                            context.startActivity(Intent(android.provider.Settings.ACTION_SETTINGS))
+                                        }
+                                    } else {
+                                        showNotifPermissionDialog = true
+                                    }
+                                }
+                            )
+                        }
+                        if (trackingMode != "NOTIFICATIONS_ONLY") {
+                            AppleDivider()
+                            AppleSettingsRow(
+                                title = "Scan SMS Inbox (Past 30 Days)",
+                                icon = Icons.Default.Search,
+                                iconBgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                                valueText = if (isScanningSms) "Scanning..." else "Scan Now",
+                                onClick = {
+                                    if (!isScanningSms) {
+                                        val hasReadSms = androidx.core.content.ContextCompat.checkSelfPermission(
+                                            context,
+                                            android.Manifest.permission.READ_SMS
+                                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                                        if (hasReadSms) {
+                                            isScanningSms = true
+                                            isMessageTrackingEnabled = true
+                                            settingsPrefs.isMessageTrackingEnabled = true
+                                            coroutineScope.launch {
+                                                val count = MessageIngestionManager.scanSmsInbox(context, 30)
+                                                isScanningSms = false
+                                                statusNotificationMsg = "SMS scan complete: Found $count transactions awaiting your approval!"
+                                            }
+                                        } else {
+                                            smsPermissionLauncher.launch(
+                                                arrayOf(
+                                                    android.Manifest.permission.READ_SMS,
+                                                    android.Manifest.permission.RECEIVE_SMS
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                    }
                 }
             }
 
@@ -3452,50 +3594,25 @@ fun SettingsScreen(
                 Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
             },
             title = {
-                Text("Reassign Transactions Before Delete", fontWeight = FontWeight.Bold)
+                Text("Delete Account & All Details?", fontWeight = FontWeight.Bold)
             },
             text = {
                 Column {
                     Text(
-                        "Account '${targetAcc.bankName}' has $linkedCount active transaction records.\n\nTo preserve your balance history and financial integrity, select the account to reassign these records to:"
+                        "Account '${targetAcc.bankName}' has $linkedCount active transaction records.\n\nDeleting this account will permanently erase all its associated statements, transactions, and balance history. This action cannot be undone."
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text("Fallback Account:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        otherAccounts.forEach { other ->
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable { selectedFallbackId = other.id }
-                                    .padding(vertical = 4.dp)
-                            ) {
-                                RadioButton(
-                                    selected = selectedFallbackId == other.id,
-                                    onClick = { selectedFallbackId = other.id }
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Column {
-                                    Text(other.bankName.ifBlank { other.accountName }, fontWeight = FontWeight.SemiBold)
-                                    Text(other.accountName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            }
-                        }
-                    }
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.deleteAccountWithReassignment(targetAcc.id, selectedFallbackId)
+                        viewModel.deleteAccount(targetAcc.id)
                         accountToDeleteWithReassign = null
                         showAccountsDialog = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
-                    Text("Reassign & Delete")
+                    Text("Delete Account & Details")
                 }
             },
             dismissButton = {
@@ -3506,13 +3623,121 @@ fun SettingsScreen(
         )
     }
 
+    if (showTrackingModeDialog) {
+        AlertDialog(
+            onDismissRequest = { showTrackingModeDialog = false },
+            title = { Text("Select Tracking Mode", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(
+                        "DUAL" to "Both (SMS & Push Notifications)",
+                        "SMS_ONLY" to "Approach A: SMS Only",
+                        "NOTIFICATIONS_ONLY" to "Approach B: Notifications Only"
+                    ).forEach { (modeKey, modeTitle) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    trackingMode = modeKey
+                                    settingsPrefs.messageTrackingMode = modeKey
+                                    showTrackingModeDialog = false
+                                }
+                                .padding(vertical = 8.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = trackingMode == modeKey,
+                                onClick = {
+                                    trackingMode = modeKey
+                                    settingsPrefs.messageTrackingMode = modeKey
+                                    showTrackingModeDialog = false
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(modeTitle, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showTrackingModeDialog = false }) {
+                    Text("Done")
+                }
+            }
+        )
+    }
+
+    if (showNotifPermissionDialog) {
+        AlertDialog(
+            onDismissRequest = { showNotifPermissionDialog = false },
+            icon = { Icon(Icons.Default.NotificationsActive, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+            title = { Text("Enable Notification Tracking", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "To automatically detect banking & UPI payments in real-time, Yosan needs Notification Listener access.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = "Important (Android 13/14+ Security):",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "If Android says 'Restricted setting: Access denied' for sideloaded apps:\n1. Tap 'Open App Info' below.\n2. Tap the 3 dots in the top right corner.\n3. Tap 'Allow restricted settings'.\n4. Come back here and tap 'Open Notification Settings'.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showNotifPermissionDialog = false
+                        try {
+                            context.startActivity(Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                        } catch (_: Exception) {
+                            context.startActivity(Intent(android.provider.Settings.ACTION_SETTINGS))
+                        }
+                    }
+                ) {
+                    Text("Open Notification Settings")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        try {
+                            val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = android.net.Uri.fromParts("package", context.packageName, null)
+                            }
+                            context.startActivity(intent)
+                        } catch (_: Exception) {}
+                    }
+                ) {
+                    Text("Open App Info")
+                }
+            }
+        )
+    }
+
     // Category Management Dialog
     if (showCategoryDialog) {
         CategoryManagementDialog(
             categories = categories,
             allTransactions = allTransactions,
-            onAddCategory = { name, type, colorHex ->
-                viewModel.addCategory(name, type, colorHex)
+            onAddCategory = { name, type, colorHex, parentId ->
+                viewModel.addCategory(name, type, colorHex, parentId)
             },
             onUpdateCategory = { cat ->
                 viewModel.updateCategory(cat)

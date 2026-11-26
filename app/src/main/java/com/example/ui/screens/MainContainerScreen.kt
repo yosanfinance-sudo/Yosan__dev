@@ -50,6 +50,7 @@ import com.example.features.walkthrough.SpotlightTourManager
 import com.example.features.walkthrough.SpotlightTourOverlay
 import com.example.features.walkthrough.SpotlightStep
 import com.example.features.walkthrough.UserWalkthroughDialog
+import com.example.features.budget.BudgetPlannerScreen
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -71,7 +72,7 @@ enum class MainTab(
 }
 
 enum class SubScreen {
-    NONE, RULES, COMPANY_EXPENSES, REPORTS, IMPORT_STATEMENT, LENDING, BORROWING, PERSONAL_EXPENSES, INVESTMENTS, TRANSFERS, EXCEL_SYNC
+    NONE, RULES, COMPANY_EXPENSES, REPORTS, IMPORT_STATEMENT, LENDING, BORROWING, PERSONAL_EXPENSES, INVESTMENTS, TRANSFERS, EXCEL_SYNC, BUDGET_PLANNER
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -222,6 +223,7 @@ fun MainContainerScreen(
                                     SubScreen.INVESTMENTS -> "Investments & Assets"
                                     SubScreen.TRANSFERS -> "Rotational / Transfers"
                                     SubScreen.EXCEL_SYNC -> "Excel Two-Way Sync"
+                                    SubScreen.BUDGET_PLANNER -> "Budget Planner"
                                     SubScreen.NONE -> ""
                                 },
                                 fontWeight = FontWeight.Bold,
@@ -238,6 +240,7 @@ fun MainContainerScreen(
                                 SubScreen.INVESTMENTS -> "Track capital allocations, stocks, mutual funds, and assets"
                                 SubScreen.TRANSFERS -> "Track self transfers and inter-account movements"
                                 SubScreen.EXCEL_SYNC -> "Bidirectional synchronization with Microsoft Excel (.xlsx)"
+                                SubScreen.BUDGET_PLANNER -> "Set monthly and category spending limits and monitor progress"
                                 SubScreen.NONE -> ""
                             }
                             if (subtitle.isNotEmpty()) {
@@ -439,6 +442,10 @@ fun MainContainerScreen(
                             onTransactionClick = { tx -> selectedTransactionForDetail = tx }
                         )
                         SubScreen.EXCEL_SYNC -> ExcelSyncScreen(viewModel = viewModel)
+                        SubScreen.BUDGET_PLANNER -> BudgetPlannerScreen(
+                            viewModel = viewModel,
+                            onBackClick = { currentSubScreen = SubScreen.NONE }
+                        )
                         SubScreen.NONE -> {}
                     }
                 } else {
@@ -486,6 +493,7 @@ fun MainContainerScreen(
                                 onNavigateToPersonalExpenses = { currentSubScreen = SubScreen.PERSONAL_EXPENSES },
                                 onNavigateToInvestments = { currentSubScreen = SubScreen.INVESTMENTS },
                                 onNavigateToTransfers = { currentSubScreen = SubScreen.TRANSFERS },
+                                onNavigateToBudget = { currentSubScreen = SubScreen.BUDGET_PLANNER },
                                 onOpenAiChat = {
                                     val currentEmail = authViewModel?.user?.value?.email ?: appPreferences.lastUserEmail
                                     val currentUser = authViewModel?.user?.value
@@ -534,6 +542,7 @@ fun MainContainerScreen(
                                 onNavigateToImport = { currentSubScreen = SubScreen.IMPORT_STATEMENT },
                                 onNavigateToLending = { currentSubScreen = SubScreen.LENDING },
                                 onNavigateToExcelSync = { currentSubScreen = SubScreen.EXCEL_SYNC },
+                                onNavigateToBudget = { currentSubScreen = SubScreen.BUDGET_PLANNER },
                                 onOpenProductTour = {
                                     currentSubScreen = SubScreen.IMPORT_STATEMENT
                                     SpotlightTourManager.startTour()

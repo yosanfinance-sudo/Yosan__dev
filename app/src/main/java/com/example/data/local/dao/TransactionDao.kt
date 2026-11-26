@@ -56,6 +56,12 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE transactionDate = :date AND description = :desc AND debitAmount = :debit AND creditAmount = :credit LIMIT 1")
     suspend fun findDuplicate(date: String, desc: String, debit: Double, credit: Double): TransactionEntity?
 
+    @Query("SELECT * FROM transactions WHERE referenceNumber = :referenceNumber AND referenceNumber != '' LIMIT 1")
+    suspend fun getTransactionByReferenceNumber(referenceNumber: String): TransactionEntity?
+
+    @Query("SELECT * FROM transactions WHERE transactionDate = :date AND amount = :amount AND transactionType = :type LIMIT 1")
+    suspend fun getTransactionByDateAmountType(date: String, amount: Double, type: TransactionType): TransactionEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTransaction(transaction: TransactionEntity): Long
 

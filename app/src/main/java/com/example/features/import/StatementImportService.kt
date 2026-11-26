@@ -1333,11 +1333,23 @@ object StatementImportService {
         val finalCategory = explicitCategory ?: "Uncategorized"
         val finalType = if (isCredit) TransactionType.INCOME else TransactionType.EXPENSE
 
-        val isDuplicate = existingTxs.any {
-            it.transactionDate == date &&
-                    it.description.equals(description, ignoreCase = true) &&
-                    Math.abs(it.debitAmount - debit) < 0.01 &&
-                    Math.abs(it.creditAmount - credit) < 0.01
+        val isDuplicate = existingTxs.any { existing ->
+            // 1. Direct Reference / UTR / RRN match (exact cross-match with SMS & Push notifications)
+            val refMatch = existing.referenceNumber.isNotBlank() && ref.isNotBlank() &&
+                    (existing.referenceNumber.equals(ref, ignoreCase = true) ||
+                     description.contains(existing.referenceNumber, ignoreCase = true) ||
+                     line.contains(existing.referenceNumber, ignoreCase = true))
+
+            // 2. Date + Exact Amount + Direction + Content similarity
+            val amountMatch = Math.abs(existing.debitAmount - debit) < 0.01 && Math.abs(existing.creditAmount - credit) < 0.01
+            val dateMatch = existing.transactionDate == date
+
+            val descMatch = existing.description.equals(description, ignoreCase = true) ||
+                    (existing.referenceNumber.isNotBlank() && description.contains(existing.referenceNumber, ignoreCase = true)) ||
+                    (ref.isNotBlank() && existing.description.contains(ref, ignoreCase = true)) ||
+                    (ref.isNotBlank() && existing.notes.contains(ref, ignoreCase = true))
+
+            refMatch || (dateMatch && amountMatch && (descMatch || ref.isBlank()))
         }
 
         return ParsedImportRow(

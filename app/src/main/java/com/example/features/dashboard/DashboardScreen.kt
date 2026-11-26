@@ -1,5 +1,6 @@
 package com.example.features.dashboard
 
+import com.example.utils.CurrencyFormatter
 import com.example.utils.adaptiveScrollRate
 
 import com.example.features.walkthrough.SpotlightTourManager
@@ -70,6 +71,7 @@ fun DashboardScreen(
     onNavigateToPersonalExpenses: () -> Unit = {},
     onNavigateToInvestments: () -> Unit = {},
     onNavigateToTransfers: () -> Unit = {},
+    onNavigateToBudget: () -> Unit = {},
     onOpenAiChat: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -105,6 +107,7 @@ fun DashboardScreen(
     val companyExpenses by viewModel.companyExpenses.collectAsState()
     val isRevealed by viewModel.isAmountTemporarilyRevealed.collectAsState()
     val privacyEnabled = userProfile?.isPrivacyBlurEnabled ?: true
+    val budgetOverview by viewModel.monthlyBudgetOverview.collectAsState()
 
     var activeDialogTitle by remember { mutableStateOf<String?>(null) }
     var activeDialogTransactions by remember { mutableStateOf<List<TransactionEntity>>(emptyList()) }
@@ -375,6 +378,111 @@ fun DashboardScreen(
 
 
 
+
+        // Monthly Budget Tracker Card
+        item(key = "dashboard_monthly_budget_card") {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .clickable {
+                        com.example.utils.HapticHelper.vibrateClick(context)
+                        onNavigateToBudget()
+                    },
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                elevation = CardDefaults.cardElevation(defaultElevation = if (LocalFloatingEffectEnabled.current) 3.dp else 0.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                shape = CircleShape,
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.PieChart,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "Monthly Budget",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = if (budgetOverview.totalBudget > 0.0) {
+                                        String.format(java.util.Locale.US, "%.0f%% used • %d days left", budgetOverview.overallPercentage, budgetOverview.daysRemainingInMonth)
+                                    } else {
+                                        "Set category targets & daily limits"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Icon(
+                            imageVector = Icons.Default.ChevronRight,
+                            contentDescription = "Open Budget Planner",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    if (budgetOverview.totalBudget > 0.0) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        val progressColor = when {
+                            budgetOverview.overallPercentage >= 100f -> ExpenseRed
+                            budgetOverview.overallPercentage >= 80f -> OutstandingAmber
+                            else -> IncomeGreen
+                        }
+                        LinearProgressIndicator(
+                            progress = { (budgetOverview.overallPercentage / 100f).coerceIn(0f, 1f) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp)),
+                            color = progressColor,
+                            trackColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            val spentFormatted = if (privacyEnabled && !isRevealed) "₹••••" else CurrencyFormatter.formatInr(budgetOverview.totalSpent)
+                            val leftFormatted = if (privacyEnabled && !isRevealed) "₹••••" else CurrencyFormatter.formatInr(kotlin.math.abs(budgetOverview.totalRemaining))
+                            Text(
+                                text = "Spent: $spentFormatted",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = if (budgetOverview.totalRemaining >= 0) "Left: $leftFormatted" else "Over: $leftFormatted",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (budgetOverview.totalRemaining >= 0) IncomeGreen else ExpenseRed
+                            )
+                        }
+                    }
+                }
+            }
+        }
 
         // Dynamic Dashboard Cards rendering based on user configuration (local-first, instant render)
         cardsConfig.forEach { cardItem ->

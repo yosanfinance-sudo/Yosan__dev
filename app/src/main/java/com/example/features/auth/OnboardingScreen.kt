@@ -755,7 +755,7 @@ fun OnboardingScreen(
 
                                 Spacer(modifier = Modifier.height(24.dp))
 
-                                // 3. Clean Footer: Restore from Backup & App Overview
+                                // 3. Clean Footer: Restore from Backup
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.Center,
@@ -770,21 +770,6 @@ fun OnboardingScreen(
                                         Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text("Restore Backup", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
-                                    }
-
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("•", color = MaterialTheme.colorScheme.outlineVariant)
-                                    Spacer(modifier = Modifier.width(8.dp))
-
-                                    TextButton(
-                                        onClick = {
-                                            HapticHelper.vibrateClick(context)
-                                            showWalkthroughDialog = true
-                                        }
-                                    ) {
-                                        Icon(Icons.Default.MenuBook, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("App Overview", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
                                     }
                                 }
                             }

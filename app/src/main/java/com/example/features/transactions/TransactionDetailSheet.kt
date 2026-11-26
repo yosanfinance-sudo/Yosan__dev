@@ -252,6 +252,10 @@ fun TransactionDetailSheet(
 
             // Details Table
             DetailRow(label = "Date", value = DateUtils.formatForDisplay(currentTx.transactionDate))
+            DetailRow(
+                label = "Category",
+                value = if (!currentTx.subcategoryName.isNullOrBlank()) "${currentTx.categoryName}  ›  ${currentTx.subcategoryName}" else currentTx.categoryName
+            )
 
             // Description Block
             Column(
@@ -382,14 +386,15 @@ fun TransactionDetailSheet(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 val allowedCategories = remember(categories, currentTx.transactionType) {
+                    val rootCats = categories.filter { it.parentCategoryId == null }
                     when (currentTx.transactionType) {
-                        TransactionType.EXPENSE -> categories.filter { it.type == CategoryType.EXPENSE }
-                        TransactionType.INCOME, TransactionType.REFUND -> categories.filter { it.type == CategoryType.INCOME }
-                        TransactionType.INVESTMENT -> categories.filter { it.type == CategoryType.INVESTMENT }
-                        TransactionType.TRANSFER -> categories.filter { it.type == CategoryType.OTHER }
-                        TransactionType.LENDING -> categories.filter { it.type == CategoryType.LENDING }
-                        TransactionType.BORROWING -> categories.filter { it.type == CategoryType.BORROWING }
-                        else -> categories
+                        TransactionType.EXPENSE -> rootCats.filter { it.type == CategoryType.EXPENSE }
+                        TransactionType.INCOME, TransactionType.REFUND -> rootCats.filter { it.type == CategoryType.INCOME }
+                        TransactionType.INVESTMENT -> rootCats.filter { it.type == CategoryType.INVESTMENT }
+                        TransactionType.TRANSFER -> rootCats.filter { it.type == CategoryType.OTHER }
+                        TransactionType.LENDING -> rootCats.filter { it.type == CategoryType.LENDING }
+                        TransactionType.BORROWING -> rootCats.filter { it.type == CategoryType.BORROWING }
+                        else -> rootCats
                     }
                 }
 
@@ -447,6 +452,137 @@ fun TransactionDetailSheet(
                             )
                         )
                     }
+                }
+
+                // Subcategory Selection for the active category
+                val activeParentCategory = remember(categories, currentTx.categoryId, currentTx.categoryName) {
+                    categories.firstOrNull { it.id == currentTx.categoryId && it.parentCategoryId == null }
+                        ?: categories.firstOrNull { it.name.equals(currentTx.categoryName, ignoreCase = true) && it.parentCategoryId == null }
+                        ?: categories.firstOrNull { it.id == currentTx.categoryId }
+                }
+
+                var showAddSubcategoryDialog by remember { mutableStateOf(false) }
+                var newSubcategoryName by remember { mutableStateOf("") }
+
+                if (activeParentCategory != null) {
+                    val availableSubcategories = remember(categories, activeParentCategory) {
+                        categories.filter { it.parentCategoryId == activeParentCategory.id }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Subcategory for ${activeParentCategory.name}",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        TextButton(
+                            onClick = {
+                                newSubcategoryName = ""
+                                showAddSubcategoryDialog = true
+                            },
+                            contentPadding = PaddingValues(0.dp)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("+ Subcategory", fontSize = 12.sp)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val isGeneralSelected = currentTx.subcategoryId == null && currentTx.subcategoryName.isNullOrBlank()
+                        FilterChip(
+                            selected = isGeneralSelected,
+                            onClick = {
+                                if (!isGeneralSelected) {
+                                    viewModel.updateTransactionSubcategory(currentTx, null)
+                                }
+                            },
+                            label = { Text("General / None", style = MaterialTheme.typography.labelSmall) },
+                            leadingIcon = if (isGeneralSelected) {
+                                { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                            } else null
+                        )
+
+                        availableSubcategories.forEach { subcat ->
+                            val isSubSelected = currentTx.subcategoryId == subcat.id ||
+                                    (currentTx.subcategoryId == null && currentTx.subcategoryName.equals(subcat.name, ignoreCase = true))
+
+                            FilterChip(
+                                selected = isSubSelected,
+                                onClick = {
+                                    if (isSubSelected) {
+                                        viewModel.updateTransactionSubcategory(currentTx, null)
+                                    } else {
+                                        viewModel.updateTransactionSubcategory(currentTx, subcat)
+                                    }
+                                },
+                                label = { Text(subcat.name, style = MaterialTheme.typography.labelSmall) },
+                                leadingIcon = if (isSubSelected) {
+                                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                                } else null
+                            )
+                        }
+                    }
+                }
+
+                if (showAddSubcategoryDialog && activeParentCategory != null) {
+                    AlertDialog(
+                        onDismissRequest = { showAddSubcategoryDialog = false },
+                        title = { Text("Add Subcategory", fontWeight = FontWeight.Bold) },
+                        text = {
+                            Column {
+                                Text(
+                                    "Creating a subcategory under '${activeParentCategory.name}'",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedTextField(
+                                    value = newSubcategoryName,
+                                    onValueChange = { newSubcategoryName = it },
+                                    label = { Text("Subcategory Name (e.g. Clothes, Dining)") },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    val name = newSubcategoryName.trim()
+                                    if (name.isNotBlank()) {
+                                        viewModel.addCategory(
+                                            name = name,
+                                            type = activeParentCategory.type,
+                                            colorHex = activeParentCategory.colorHex,
+                                            parentCategoryId = activeParentCategory.id
+                                        )
+                                        showAddSubcategoryDialog = false
+                                    }
+                                }
+                            ) {
+                                Text("Add")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showAddSubcategoryDialog = false }) {
+                                Text("Cancel")
+                            }
+                        }
+                    )
                 }
             }
 
@@ -866,27 +1002,29 @@ fun TransactionDetailSheet(
             Spacer(modifier = Modifier.height(24.dp))
         }
 
-        // Category Picker Dialog
+        // Category & Subcategory Picker Dialog
         if (showCategoryPicker) {
             var showAddCatInput by remember { mutableStateOf(false) }
             var newCatName by remember { mutableStateOf("") }
+            var newCatParentId by remember { mutableStateOf<Long?>(null) }
             var newCatType by remember { mutableStateOf(CategoryType.EXPENSE) }
 
             AlertDialog(
                 onDismissRequest = { showCategoryPicker = false },
-                title = { Text("Select Category", fontWeight = FontWeight.Bold) },
+                title = { Text(if (newCatParentId != null) "Add Subcategory" else "Select Category & Subcategory", fontWeight = FontWeight.Bold) },
                 text = {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         if (!showAddCatInput) {
                             val modalAllowedCats = remember(categories, currentTx.transactionType) {
+                                val rootCats = categories.filter { it.parentCategoryId == null }
                                 when (currentTx.transactionType) {
-                                    TransactionType.EXPENSE -> categories.filter { it.type == CategoryType.EXPENSE }
-                                    TransactionType.INCOME, TransactionType.REFUND -> categories.filter { it.type == CategoryType.INCOME }
-                                    TransactionType.INVESTMENT -> categories.filter { it.type == CategoryType.INVESTMENT }
-                                    TransactionType.TRANSFER -> categories.filter { it.type == CategoryType.OTHER }
-                                    TransactionType.LENDING -> categories.filter { it.type == CategoryType.LENDING }
-                                    TransactionType.BORROWING -> categories.filter { it.type == CategoryType.BORROWING }
-                                    else -> categories
+                                    TransactionType.EXPENSE -> rootCats.filter { it.type == CategoryType.EXPENSE }
+                                    TransactionType.INCOME, TransactionType.REFUND -> rootCats.filter { it.type == CategoryType.INCOME }
+                                    TransactionType.INVESTMENT -> rootCats.filter { it.type == CategoryType.INVESTMENT }
+                                    TransactionType.TRANSFER -> rootCats.filter { it.type == CategoryType.OTHER }
+                                    TransactionType.LENDING -> rootCats.filter { it.type == CategoryType.LENDING }
+                                    TransactionType.BORROWING -> rootCats.filter { it.type == CategoryType.BORROWING }
+                                    else -> rootCats
                                 }
                             }
                             if (modalAllowedCats.isEmpty()) {
@@ -896,27 +1034,78 @@ fun TransactionDetailSheet(
                                     modifier = Modifier.padding(vertical = 12.dp)
                                 )
                             }
-                            LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
+                            LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
                                 items(modalAllowedCats) { cat: CategoryEntity ->
-                                    Row(
+                                    val subcategories = remember(cat.id, categories) {
+                                        categories.filter { it.parentCategoryId == cat.id }
+                                    }
+                                    Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clickable {
-                                                viewModel.updateTransactionCategory(currentTx, cat)
-                                                showCategoryPicker = false
-                                            }
-                                            .padding(vertical = 10.dp, horizontal = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically
+                                            .padding(vertical = 4.dp)
                                     ) {
-                                        CategoryChip(categoryName = cat.name, colorHex = cat.colorHex)
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Text(text = cat.name, style = MaterialTheme.typography.bodyMedium)
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable {
+                                                    viewModel.updateTransactionCategory(currentTx, cat)
+                                                    viewModel.updateTransactionSubcategory(currentTx, null)
+                                                    showCategoryPicker = false
+                                                }
+                                                .padding(vertical = 8.dp, horizontal = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                CategoryChip(categoryName = cat.name, colorHex = cat.colorHex)
+                                                Spacer(modifier = Modifier.width(10.dp))
+                                                Text(text = cat.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                                            }
+                                            IconButton(
+                                                onClick = {
+                                                    newCatParentId = cat.id
+                                                    newCatType = cat.type
+                                                    newCatName = ""
+                                                    showAddCatInput = true
+                                                },
+                                                modifier = Modifier.size(28.dp)
+                                            ) {
+                                                Icon(Icons.Default.Add, contentDescription = "Add Subcategory", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                                            }
+                                        }
+
+                                        if (subcategories.isNotEmpty()) {
+                                            Column(modifier = Modifier.padding(start = 28.dp)) {
+                                                subcategories.forEach { sub ->
+                                                    Row(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .clip(RoundedCornerShape(6.dp))
+                                                            .clickable {
+                                                                viewModel.updateTransactionCategory(currentTx, cat)
+                                                                viewModel.updateTransactionSubcategory(currentTx, sub)
+                                                                showCategoryPicker = false
+                                                            }
+                                                            .padding(vertical = 6.dp, horizontal = 6.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Text(
+                                                            text = "↳ ${sub.name}",
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
                             Spacer(modifier = Modifier.height(12.dp))
                             Button(
                                 onClick = {
+                                    newCatParentId = null
                                     showAddCatInput = true
                                     newCatType = when (currentTx.transactionType) {
                                         TransactionType.INCOME, TransactionType.REFUND -> CategoryType.INCOME
@@ -935,19 +1124,27 @@ fun TransactionDetailSheet(
                                 Text("Add Custom Category")
                             }
                         } else {
-                            Text("Create New Category", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            val parent = categories.firstOrNull { it.id == newCatParentId }
+                            Text(
+                                text = if (parent != null) "Create Subcategory under '${parent.name}'" else "Create New Category",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
                             Spacer(modifier = Modifier.height(10.dp))
                             OutlinedTextField(
                                 value = newCatName,
                                 onValueChange = { newCatName = it },
-                                label = { Text("Category Name") },
+                                label = { Text(if (parent != null) "Subcategory Name" else "Category Name") },
                                 singleLine = true,
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier.fillMaxWidth()
                             )
                             Spacer(modifier = Modifier.height(16.dp))
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                TextButton(onClick = { showAddCatInput = false }) { Text("Back") }
+                                TextButton(onClick = {
+                                    showAddCatInput = false
+                                    newCatParentId = null
+                                }) { Text("Back") }
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Button(
                                     onClick = {
@@ -955,8 +1152,14 @@ fun TransactionDetailSheet(
                                             val colorsList = listOf("#EF4444", "#F59E0B", "#3B82F6", "#10B981", "#8B5CF6", "#EC4899", "#06B6D4", "#94A3B8")
                                             val usedColors = categories.map { it.colorHex.uppercase() }.toSet()
                                             val autoColor = colorsList.firstOrNull { it.uppercase() !in usedColors } ?: colorsList[categories.size % colorsList.size]
-                                            viewModel.addCategory(newCatName.trim(), newCatType, autoColor)
+                                            viewModel.addCategory(
+                                                name = newCatName.trim(),
+                                                type = newCatType,
+                                                colorHex = parent?.colorHex ?: autoColor,
+                                                parentCategoryId = newCatParentId
+                                            )
                                             newCatName = ""
+                                            newCatParentId = null
                                             showAddCatInput = false
                                         }
                                     },

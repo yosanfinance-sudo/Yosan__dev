@@ -57,7 +57,9 @@ fun PersonalExpensesScreen(
     }
 
     val categories = remember(personalTxs) {
-        personalTxs.map { it.categoryName }.filter { it.isNotBlank() }.distinct()
+        val rootCats = personalTxs.map { it.categoryName }.filter { it.isNotBlank() }
+        val subCats = personalTxs.mapNotNull { it.subcategoryName }.filter { it.isNotBlank() }
+        (rootCats + subCats).distinct()
     }
 
     var selectedCategory by remember { mutableStateOf<String?>(null) }
@@ -65,10 +67,13 @@ fun PersonalExpensesScreen(
 
     val filteredList = remember(personalTxs, selectedCategory, searchQuery) {
         personalTxs.filter { tx ->
-            val matchesCat = selectedCategory == null || tx.categoryName.equals(selectedCategory, ignoreCase = true)
+            val matchesCat = selectedCategory == null ||
+                    tx.categoryName.equals(selectedCategory, ignoreCase = true) ||
+                    (!tx.subcategoryName.isNullOrBlank() && tx.subcategoryName.equals(selectedCategory, ignoreCase = true))
             val matchesQuery = searchQuery.isBlank() ||
                     tx.description.contains(searchQuery, ignoreCase = true) ||
                     tx.categoryName.contains(searchQuery, ignoreCase = true) ||
+                    (!tx.subcategoryName.isNullOrBlank() && tx.subcategoryName.contains(searchQuery, ignoreCase = true)) ||
                     tx.notes.contains(searchQuery, ignoreCase = true)
             matchesCat && matchesQuery
         }

@@ -453,12 +453,12 @@ fun UndoHistoryDialog(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun CategoryManagementDialog(
     categories: List<CategoryEntity>,
     allTransactions: List<com.example.data.local.entity.TransactionEntity>,
-    onAddCategory: (String, CategoryType, String) -> Unit,
+    onAddCategory: (String, CategoryType, String, Long?) -> Unit,
     onUpdateCategory: (CategoryEntity) -> Unit,
     onDeleteCategory: (Long) -> Unit,
     onReassignAndDelete: (Long, Long, String) -> Unit,
@@ -473,32 +473,15 @@ fun CategoryManagementDialog(
         if (selectedFilter == null) categories else categories.filter { it.type == selectedFilter }
     }
 
+    var initialParentIdForNew by remember { mutableStateOf<Long?>(null) }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Category,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Manage Categories", fontWeight = FontWeight.Bold)
-                }
-                IconButton(onClick = { showAddCategoryDialog = true }) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Add Category",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
+            Text(
+                text = "Categories & Subcategories",
+                fontWeight = FontWeight.Bold
+            )
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -509,13 +492,14 @@ fun CategoryManagementDialog(
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    val rootCount = categories.count { it.parentCategoryId == null }
                     FilterChip(
                         selected = selectedFilter == null,
                         onClick = { selectedFilter = null },
-                        label = { Text("All (${categories.size})") }
+                        label = { Text("All ($rootCount)") }
                     )
                     CategoryType.values().forEach { cType ->
-                        val count = categories.count { it.type == cType }
+                        val count = categories.count { it.type == cType && it.parentCategoryId == null }
                         FilterChip(
                             selected = selectedFilter == cType,
                             onClick = { selectedFilter = cType },
@@ -526,93 +510,227 @@ fun CategoryManagementDialog(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 420.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    items(filteredCategories.size) { idx ->
-                        val cat = filteredCategories[idx]
-                        val txCount = remember(cat, allTransactions) {
-                            allTransactions.count { it.categoryId == cat.id || it.categoryName.equals(cat.name, ignoreCase = true) }
-                        }
-                        val colorParsed = remember(cat.colorHex) {
-                            try {
-                                Color(android.graphics.Color.parseColor(cat.colorHex))
-                            } catch (_: Exception) {
-                                Color(0xFF10B981)
-                            }
-                        }
+                val rootCategories = remember(filteredCategories) {
+                    filteredCategories.filter { it.parentCategoryId == null }
+                }
 
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                if (rootCategories.isEmpty()) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(
-                                    modifier = Modifier.weight(1f),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Surface(
-                                        color = colorParsed,
-                                        shape = CircleShape,
-                                        modifier = Modifier.size(16.dp)
-                                    ) {}
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                text = cat.name,
-                                                style = MaterialTheme.typography.titleSmall,
-                                                fontWeight = FontWeight.Bold,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                        Text(
-                                            text = "${cat.type.name} • $txCount transactions",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
+                            Icon(
+                                imageVector = Icons.Default.Category,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                                modifier = Modifier.size(40.dp)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "No Categories Found",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Add categories and subcategories to organize your financial statements.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 440.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(rootCategories.size) { idx ->
+                            val cat = rootCategories[idx]
+                            val subcategories = remember(cat.id, categories) {
+                                categories.filter { it.parentCategoryId == cat.id }
+                            }
+                            val txCount = remember(cat, allTransactions, subcategories) {
+                                val subIds = subcategories.map { it.id }.toSet()
+                                allTransactions.count {
+                                    it.categoryId == cat.id || it.categoryName.equals(cat.name, ignoreCase = true) ||
+                                            (it.subcategoryId != null && subIds.contains(it.subcategoryId))
                                 }
+                            }
+                            val colorParsed = remember(cat.colorHex) {
+                                try {
+                                    Color(android.graphics.Color.parseColor(cat.colorHex))
+                                } catch (_: Exception) {
+                                    Color(0xFF10B981)
+                                }
+                            }
 
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    IconButton(
-                                        onClick = { editingCategory = cat },
-                                        modifier = Modifier.size(32.dp)
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                                ),
+                                border = BorderStroke(
+                                    width = 1.dp,
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                                )
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    // Parent Row
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
-                                        Icon(
-                                            Icons.Default.Edit,
-                                            contentDescription = "Edit Category",
-                                            modifier = Modifier.size(16.dp),
-                                            tint = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                    IconButton(
-                                        onClick = {
-                                            if (txCount > 0) {
-                                                categoryToDeleteWithReassign = cat
-                                            } else {
-                                                onDeleteCategory(cat.id)
+                                        Row(
+                                            modifier = Modifier.weight(1f),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Surface(
+                                                color = colorParsed.copy(alpha = 0.16f),
+                                                shape = CircleShape,
+                                                modifier = Modifier.size(44.dp)
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Category,
+                                                        contentDescription = cat.name,
+                                                        tint = colorParsed,
+                                                        modifier = Modifier.size(24.dp)
+                                                    )
+                                                }
                                             }
-                                        },
-                                        modifier = Modifier.size(32.dp)
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = cat.name,
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                val typeStr = cat.type.name.lowercase().replaceFirstChar { it.uppercase() }
+                                                Text(
+                                                    text = "$typeStr • $txCount txns",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            IconButton(
+                                                onClick = { editingCategory = cat },
+                                                modifier = Modifier.size(32.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Edit,
+                                                    contentDescription = "Edit Category",
+                                                    modifier = Modifier.size(18.dp),
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                            }
+                                            IconButton(
+                                                onClick = {
+                                                    if (txCount > 0) {
+                                                        categoryToDeleteWithReassign = cat
+                                                    } else {
+                                                        onDeleteCategory(cat.id)
+                                                    }
+                                                },
+                                                modifier = Modifier.size(32.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.DeleteOutline,
+                                                    contentDescription = "Delete Category",
+                                                    modifier = Modifier.size(18.dp),
+                                                    tint = MaterialTheme.colorScheme.error
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    // Subcategories Section
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+                                    Spacer(modifier = Modifier.height(8.dp))
+
+                                    androidx.compose.foundation.layout.FlowRow(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        Icon(
-                                            Icons.Default.DeleteOutline,
-                                            contentDescription = "Delete Category",
-                                            modifier = Modifier.size(16.dp),
-                                            tint = MaterialTheme.colorScheme.error
+                                        subcategories.forEach { sub ->
+                                            Surface(
+                                                color = MaterialTheme.colorScheme.surface,
+                                                shape = RoundedCornerShape(8.dp),
+                                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(start = 8.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(7.dp)
+                                                            .clip(CircleShape)
+                                                            .background(colorParsed.copy(alpha = 0.9f))
+                                                    )
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text(
+                                                        text = sub.name,
+                                                        style = MaterialTheme.typography.labelMedium,
+                                                        fontWeight = FontWeight.Medium
+                                                    )
+                                                    IconButton(
+                                                        onClick = { editingCategory = sub },
+                                                        modifier = Modifier.size(24.dp)
+                                                    ) {
+                                                        Icon(
+                                                            Icons.Default.Edit,
+                                                            contentDescription = "Edit",
+                                                            modifier = Modifier.size(12.dp),
+                                                            tint = MaterialTheme.colorScheme.primary
+                                                        )
+                                                    }
+                                                    IconButton(
+                                                        onClick = { onDeleteCategory(sub.id) },
+                                                        modifier = Modifier.size(24.dp)
+                                                    ) {
+                                                        Icon(
+                                                            Icons.Default.Close,
+                                                            contentDescription = "Delete",
+                                                            modifier = Modifier.size(12.dp),
+                                                            tint = MaterialTheme.colorScheme.error
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        AssistChip(
+                                            onClick = {
+                                                initialParentIdForNew = cat.id
+                                                showAddCategoryDialog = true
+                                            },
+                                            label = { Text("+ Subcategory", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(13.dp))
+                                            },
+                                            modifier = Modifier.height(30.dp),
+                                            shape = RoundedCornerShape(8.dp)
                                         )
                                     }
                                 }
@@ -620,10 +738,25 @@ fun CategoryManagementDialog(
                         }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                Button(
+                    onClick = {
+                        initialParentIdForNew = null
+                        editingCategory = null
+                        showAddCategoryDialog = true
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Add")
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Add Category")
+                }
             }
         },
         confirmButton = {
-            Button(onClick = onDismiss, shape = RoundedCornerShape(12.dp)) {
+            TextButton(onClick = onDismiss) {
                 Text("Close")
             }
         }
@@ -635,7 +768,13 @@ fun CategoryManagementDialog(
         var catName by remember { mutableStateOf(editingCategory?.name ?: "") }
         var catType by remember { mutableStateOf(editingCategory?.type ?: CategoryType.EXPENSE) }
         var catColor by remember { mutableStateOf(editingCategory?.colorHex ?: "#3B82F6") }
+        var isSubcategory by remember { mutableStateOf(editingCategory?.parentCategoryId != null || initialParentIdForNew != null) }
+        var selectedParentId by remember { mutableStateOf(editingCategory?.parentCategoryId ?: initialParentIdForNew) }
         var errorMessage by remember { mutableStateOf<String?>(null) }
+
+        val potentialParents = remember(categories, catType, editingCategory) {
+            categories.filter { it.parentCategoryId == null && it.type == catType && (!isEditing || it.id != editingCategory?.id) }
+        }
 
         val palette = listOf(
             "#EF4444", "#10B981", "#3B82F6", "#8B5CF6",
@@ -701,6 +840,37 @@ fun CategoryManagementDialog(
                             ) {}
                         }
                     }
+
+                    if (potentialParents.isNotEmpty()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable { isSubcategory = !isSubcategory }
+                        ) {
+                            Checkbox(
+                                checked = isSubcategory,
+                                onCheckedChange = { isSubcategory = it }
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Nest as subcategory under another category", style = MaterialTheme.typography.bodySmall)
+                        }
+
+                        if (isSubcategory) {
+                            Text("Select Parent Category", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                potentialParents.forEach { p ->
+                                    val isPSelected = selectedParentId == p.id
+                                    FilterChip(
+                                        selected = isPSelected,
+                                        onClick = { selectedParentId = if (isPSelected) null else p.id },
+                                        label = { Text(p.name) }
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             },
             confirmButton = {
@@ -718,6 +888,7 @@ fun CategoryManagementDialog(
                             errorMessage = "Category '$trimmed' already exists"
                             return@Button
                         }
+                        val finalParentId = if (isSubcategory) selectedParentId else null
                         if (isEditing) {
                             editingCategory?.let { current ->
                                 onUpdateCategory(
@@ -725,12 +896,13 @@ fun CategoryManagementDialog(
                                         name = trimmed,
                                         type = catType,
                                         colorHex = catColor,
+                                        parentCategoryId = finalParentId,
                                         updatedAt = System.currentTimeMillis()
                                     )
                                 )
                             }
                         } else {
-                            onAddCategory(trimmed, catType, catColor)
+                            onAddCategory(trimmed, catType, catColor, finalParentId)
                         }
                         showAddCategoryDialog = false
                         editingCategory = null

@@ -24,6 +24,8 @@ data class TransactionEntity(
     val balanceAfterTransaction: Double? = null,
     val categoryId: Long? = null,
     val categoryName: String = "Uncategorized",
+    val subcategoryId: Long? = null,
+    val subcategoryName: String? = null,
     val source: String = "MANUAL", // MANUAL, IMPORT_EXCEL, IMPORT_CSV
     val referenceNumber: String = "",
     val notes: String = "",

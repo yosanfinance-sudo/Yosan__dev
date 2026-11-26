@@ -38,6 +38,7 @@ import com.example.data.local.entity.TransactionEntity
 import com.example.data.local.entity.TransactionType
 import com.example.ui.components.*
 import com.example.ui.theme.*
+import com.example.features.messages.PendingTransactionsReviewSheet
 import com.example.features.transactions.FinanceViewModel
 import com.example.utils.CurrencyFormatter
 import com.example.utils.DateUtils
@@ -66,6 +67,8 @@ fun TransactionsScreen(
     val userProfile by viewModel.userProfile.collectAsState()
     val allTransactions by viewModel.allTransactions.collectAsState()
     val isRevealed by viewModel.isAmountTemporarilyRevealed.collectAsState()
+    val pendingCount by viewModel.pendingCount.collectAsState()
+    var showPendingReviewSheet by remember { mutableStateOf(false) }
     var showTxFlipkartFilterSheet by remember { mutableStateOf(false) }
     val txActiveCount = remember(selectedType, selectedCategory, selectedAccount, selectedMonth) {
         (if (selectedType != null) 1 else 0) +
@@ -839,6 +842,70 @@ fun TransactionsScreen(
             }
         }
 
+        // Two-Step Verification Pending Banner
+        if (pendingCount > 0) {
+            Surface(
+                color = OutstandingAmber.copy(alpha = 0.12f),
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, OutstandingAmber.copy(alpha = 0.45f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                    .clickable { showPendingReviewSheet = true }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Surface(
+                            color = OutstandingAmber.copy(alpha = 0.2f),
+                            shape = CircleShape,
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.NotificationsActive,
+                                    contentDescription = null,
+                                    tint = OutstandingAmber,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "$pendingCount Detected Transactions",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Captured from messages • Tap to review and approve",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                    Button(
+                        onClick = { showPendingReviewSheet = true },
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = OutstandingAmber)
+                    ) {
+                        Text("Review", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
+            }
+        }
+
         val isDataLoaded by viewModel.isDataLoaded.collectAsState()
 
         // 4. Statement Transactions List
@@ -1347,13 +1414,29 @@ fun TransactionsScreen(
                                     }
                                 }
 
-                                categories.forEach { cat ->
+                                val sortedCategories = remember(categories) {
+                                    val roots = categories.filter { it.parentCategoryId == null }
+                                    val result = mutableListOf<CategoryEntity>()
+                                    roots.forEach { root ->
+                                        result.add(root)
+                                        val subs = categories.filter { it.parentCategoryId == root.id }
+                                        result.addAll(subs)
+                                    }
+                                    val includedIds = result.map { it.id }.toSet()
+                                    result.addAll(categories.filter { !includedIds.contains(it.id) })
+                                    result
+                                }
+
+                                sortedCategories.forEach { cat ->
+                                    val isSubcategory = cat.parentCategoryId != null
+                                    val parentName = if (isSubcategory) categories.firstOrNull { it.id == cat.parentCategoryId }?.name else null
                                     val isSelected = draftCategoryName.equals(cat.name, ignoreCase = true)
                                     Surface(
                                         color = if (isSelected) FilterSelectionBlue.copy(alpha = 0.12f) else Color.Transparent,
                                         shape = RoundedCornerShape(8.dp),
                                         modifier = Modifier
                                             .fillMaxWidth()
+                                            .padding(start = if (isSubcategory) 20.dp else 0.dp)
                                             .clip(RoundedCornerShape(8.dp))
                                             .clickable {
                                                 HapticHelper.vibrateTick(context)
@@ -1376,9 +1459,9 @@ fun TransactionsScreen(
                                             )
                                             Spacer(modifier = Modifier.width(4.dp))
                                             Text(
-                                                text = cat.name,
+                                                text = if (isSubcategory) "↳ ${cat.name} (${parentName ?: "Sub"})" else cat.name,
                                                 style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                fontWeight = if (isSelected) FontWeight.Bold else (if (isSubcategory) FontWeight.Normal else FontWeight.Medium),
                                                 color = if (isSelected) FilterSelectionBlue else MaterialTheme.colorScheme.onSurface
                                             )
                                         }
@@ -1512,6 +1595,13 @@ fun TransactionsScreen(
                 }
             }
         }
+    }
+
+    if (showPendingReviewSheet) {
+        PendingTransactionsReviewSheet(
+            viewModel = viewModel,
+            onDismiss = { showPendingReviewSheet = false }
+        )
     }
 
     SnackbarHost(

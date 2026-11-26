@@ -21,6 +21,18 @@ class AppPreferences(private val context: Context) {
     private val prefs: SharedPreferences =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
+    var isMessageTrackingEnabled: Boolean
+        get() = prefs.getBoolean("key_message_tracking_enabled", false)
+        set(value) {
+            prefs.edit().putBoolean("key_message_tracking_enabled", value).apply()
+        }
+
+    var messageTrackingMode: String
+        get() = prefs.getString("key_message_tracking_mode", "DUAL") ?: "DUAL"
+        set(value) {
+            prefs.edit().putString("key_message_tracking_mode", value).apply()
+        }
+
     var isOnboardingCompleted: Boolean
         get() = prefs.getBoolean(KEY_ONBOARDING_COMPLETED, false)
         set(value) {

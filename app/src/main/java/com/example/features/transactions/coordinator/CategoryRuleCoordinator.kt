@@ -234,12 +234,13 @@ class CategoryRuleCoordinator(
         }
     }
 
-    fun addCategory(name: String, type: CategoryType, colorHex: String) {
+    fun addCategory(name: String, type: CategoryType, colorHex: String, parentCategoryId: Long? = null) {
         scope.launch {
             val cat = CategoryEntity(
                 name = name.trim(),
                 type = type,
-                colorHex = colorHex
+                colorHex = colorHex,
+                parentCategoryId = parentCategoryId
             )
             repository.insertCategory(cat)
             showMessage("Category '$name' created")

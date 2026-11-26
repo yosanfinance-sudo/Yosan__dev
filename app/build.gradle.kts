@@ -13,8 +13,8 @@ android {
   namespace = "com.example"
   compileSdk = 36
 
-  val vCode = (System.getenv("APP_VERSION_CODE") ?: project.findProperty("versionCode") as? String)?.toIntOrNull() ?: 53
-  val vName = System.getenv("APP_VERSION_NAME") ?: (project.findProperty("versionName") as? String) ?: "1.1.53"
+  val vCode = (System.getenv("APP_VERSION_CODE") ?: project.findProperty("versionCode") as? String)?.toIntOrNull() ?: 58
+  val vName = System.getenv("APP_VERSION_NAME") ?: (project.findProperty("versionName") as? String) ?: "1.1.56.dev3"
   val backendUrl = (System.getenv("BACKEND_URL")?.takeIf { it.isNotBlank() } ?: project.findProperty("backendUrl") as? String)?.takeIf { it.isNotBlank() } ?: "https://api.yosan.finance/"
 
   defaultConfig {

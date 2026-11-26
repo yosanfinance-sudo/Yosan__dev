@@ -13,6 +13,21 @@ interface CategoryDao {
     @Query("SELECT * FROM categories WHERE type = :type ORDER BY name ASC")
     fun getCategoriesByType(type: CategoryType): Flow<List<CategoryEntity>>
 
+    @Query("SELECT * FROM categories WHERE parentCategoryId IS NULL ORDER BY name ASC")
+    fun getRootCategories(): Flow<List<CategoryEntity>>
+
+    @Query("SELECT * FROM categories WHERE parentCategoryId IS NULL AND type = :type ORDER BY name ASC")
+    fun getRootCategoriesByType(type: CategoryType): Flow<List<CategoryEntity>>
+
+    @Query("SELECT * FROM categories WHERE parentCategoryId = :parentId ORDER BY name ASC")
+    fun getSubcategories(parentId: Long): Flow<List<CategoryEntity>>
+
+    @Query("SELECT * FROM categories WHERE parentCategoryId = :parentId ORDER BY name ASC")
+    suspend fun getSubcategoriesList(parentId: Long): List<CategoryEntity>
+
+    @Query("SELECT * FROM categories WHERE parentCategoryId IS NOT NULL ORDER BY name ASC")
+    fun getAllSubcategories(): Flow<List<CategoryEntity>>
+
     @Query("SELECT * FROM categories WHERE id = :id LIMIT 1")
     suspend fun getCategoryById(id: Long): CategoryEntity?
 

@@ -16,6 +16,7 @@ class FinanceRepository(private val database: AppDatabase) {
     private val companyExpenseDao = database.companyExpenseDao()
     private val profileDao = database.userProfileDao()
     private val undoDao = database.undoDao()
+    private val budgetDao = database.budgetDao()
 
     // Undo History
     val undoHistory: Flow<List<UndoHistoryEntity>> = undoDao.getRecentUndoActions()
@@ -41,10 +42,26 @@ class FinanceRepository(private val database: AppDatabase) {
 
     // Categories
     val allCategories: Flow<List<CategoryEntity>> = categoryDao.getAllCategories()
+    fun getRootCategories(): Flow<List<CategoryEntity>> = categoryDao.getRootCategories()
+    fun getRootCategoriesByType(type: CategoryType): Flow<List<CategoryEntity>> = categoryDao.getRootCategoriesByType(type)
+    fun getSubcategories(parentId: Long): Flow<List<CategoryEntity>> = categoryDao.getSubcategories(parentId)
+    suspend fun getSubcategoriesList(parentId: Long): List<CategoryEntity> = categoryDao.getSubcategoriesList(parentId)
     suspend fun getCategoriesByType(type: CategoryType) = categoryDao.getCategoriesByType(type)
     suspend fun insertCategory(category: CategoryEntity) = categoryDao.insertCategory(category)
     suspend fun updateCategory(category: CategoryEntity) = categoryDao.updateCategory(category)
     suspend fun deleteCategory(id: Long) = categoryDao.deleteCategory(id)
+
+    // Budgets
+    val allBudgets: Flow<List<BudgetEntity>> = budgetDao.getAllBudgets()
+    fun getBudgetsForMonth(monthYear: String): Flow<List<BudgetEntity>> = budgetDao.getBudgetsForMonth(monthYear)
+    suspend fun getBudgetsForMonthList(monthYear: String): List<BudgetEntity> = budgetDao.getBudgetsForMonthList(monthYear)
+    fun getRecurringBudgets(): Flow<List<BudgetEntity>> = budgetDao.getRecurringBudgets()
+    suspend fun getRecurringBudgetsList(): List<BudgetEntity> = budgetDao.getRecurringBudgetsList()
+    suspend fun getBudget(categoryId: Long, subcategoryId: Long?, monthYear: String) = budgetDao.getBudget(categoryId, subcategoryId, monthYear)
+    suspend fun insertBudget(budget: BudgetEntity) = budgetDao.insertBudget(budget)
+    suspend fun updateBudget(budget: BudgetEntity) = budgetDao.updateBudget(budget)
+    suspend fun deleteBudget(id: Long) = budgetDao.deleteBudget(id)
+    suspend fun deleteBudgetsForCategory(categoryId: Long) = budgetDao.deleteBudgetsForCategory(categoryId)
 
     // Categorization Rules
     val allRules: Flow<List<CategorizationRuleEntity>> = ruleDao.getAllRules()

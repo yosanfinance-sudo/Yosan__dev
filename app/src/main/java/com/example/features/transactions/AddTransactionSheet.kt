@@ -96,9 +96,18 @@ fun AddTransactionSheet(
     var description by remember { mutableStateOf(draft.description) }
     var dateText by remember { mutableStateOf(draft.dateText.ifBlank { DateUtils.getCurrentDate() }) }
     var selectedCategory by remember { mutableStateOf<CategoryEntity?>(null) }
+    var selectedSubcategory by remember { mutableStateOf<CategoryEntity?>(null) }
+    var showAddSubcategoryDialog by remember { mutableStateOf(false) }
+    var newSubcategoryName by remember { mutableStateOf("") }
     LaunchedEffect(categories, draft.categoryId) {
         if (selectedCategory == null && draft.categoryId != null) {
-            selectedCategory = categories.firstOrNull { it.id == draft.categoryId }
+            val found = categories.firstOrNull { it.id == draft.categoryId }
+            if (found != null && found.parentCategoryId != null) {
+                selectedCategory = categories.firstOrNull { it.id == found.parentCategoryId }
+                selectedSubcategory = found
+            } else {
+                selectedCategory = found
+            }
         }
     }
 
@@ -480,7 +489,7 @@ fun AddTransactionSheet(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     val filteredCats = categories.filter {
-                        when (selectedTab) {
+                        it.parentCategoryId == null && when (selectedTab) {
                             AddTab.INCOME -> it.type == CategoryType.INCOME
                             AddTab.INVESTMENT -> it.type == CategoryType.INVESTMENT
                             else -> it.type == CategoryType.EXPENSE
@@ -501,7 +510,13 @@ fun AddTransactionSheet(
                             FilterChip(
                                 selected = isSelected,
                                 onClick = {
-                                    selectedCategory = if (isSelected) null else cat
+                                    if (isSelected) {
+                                        selectedCategory = null
+                                        selectedSubcategory = null
+                                    } else {
+                                        selectedCategory = cat
+                                        selectedSubcategory = null
+                                    }
                                     if (cat.name.equals("Advance", ignoreCase = true) && advanceId.isBlank()) {
                                         advanceId = viewModel.generateNextAdvanceId()
                                     }
@@ -525,6 +540,58 @@ fun AddTransactionSheet(
                                     selectedLeadingIconColor = catColor
                                 )
                             )
+                        }
+                    }
+
+                    // Subcategory Selector Row
+                    if (selectedCategory != null) {
+                        val availableSubcategories = remember(selectedCategory, categories) {
+                            categories.filter { it.parentCategoryId == selectedCategory?.id }
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "Subcategory for ${selectedCategory?.name}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        LazyRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            item {
+                                FilterChip(
+                                    selected = selectedSubcategory == null,
+                                    onClick = { selectedSubcategory = null },
+                                    label = { Text("General / None") }
+                                )
+                            }
+                            items(availableSubcategories) { subcat ->
+                                val isSubSelected = selectedSubcategory?.id == subcat.id
+                                FilterChip(
+                                    selected = isSubSelected,
+                                    onClick = { selectedSubcategory = if (isSubSelected) null else subcat },
+                                    label = { Text(subcat.name) },
+                                    leadingIcon = {
+                                        if (isSubSelected) {
+                                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        }
+                                    }
+                                )
+                            }
+                            item {
+                                AssistChip(
+                                    onClick = {
+                                        newSubcategoryName = ""
+                                        showAddSubcategoryDialog = true
+                                    },
+                                    label = { Text("+ Subcategory") },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    }
+                                )
+                            }
                         }
                     }
 
@@ -997,14 +1064,16 @@ fun AddTransactionSheet(
                             }
                             viewModel.addManualTransaction(
                                 date = dateText,
-                                description = if (description.isNotBlank()) description else cat.name,
+                                description = if (description.isNotBlank()) description else (selectedSubcategory?.name ?: cat.name),
                                 amount = amt,
                                 type = TransactionType.EXPENSE,
                                 categoryId = cat.id,
                                 categoryName = cat.name,
                                 accountId = manualAccId,
                                 notes = notes,
-                                advanceId = advanceId.takeIf { it.isNotBlank() }
+                                advanceId = advanceId.takeIf { it.isNotBlank() },
+                                subcategoryId = selectedSubcategory?.id,
+                                subcategoryName = selectedSubcategory?.name
                             )
                             if (cat.name.equals("Official Expense", ignoreCase = true)) {
                                 viewModel.addCompanyExpense(
@@ -1034,14 +1103,16 @@ fun AddTransactionSheet(
                             }
                             viewModel.addManualTransaction(
                                 date = dateText,
-                                description = if (description.isNotBlank()) description else "Income Credit",
+                                description = if (description.isNotBlank()) description else (selectedSubcategory?.name ?: "Income Credit"),
                                 amount = amt,
                                 type = TransactionType.INCOME,
                                 categoryId = cat.id,
                                 categoryName = cat.name,
                                 accountId = manualAccId,
                                 notes = notes,
-                                advanceId = cleanAdvId
+                                advanceId = cleanAdvId,
+                                subcategoryId = selectedSubcategory?.id,
+                                subcategoryName = selectedSubcategory?.name
                             )
                         }
                         AddTab.LEND_MONEY -> {
@@ -1185,5 +1256,53 @@ fun AddTransactionSheet(
 
             Spacer(modifier = Modifier.height(24.dp))
         }
+    }
+
+    if (showAddSubcategoryDialog && selectedCategory != null) {
+        val parent = selectedCategory!!
+        AlertDialog(
+            onDismissRequest = { showAddSubcategoryDialog = false },
+            title = { Text("Add Subcategory") },
+            text = {
+                Column {
+                    Text(
+                        "Creating a subcategory under '${parent.name}'",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = newSubcategoryName,
+                        onValueChange = { newSubcategoryName = it },
+                        label = { Text("Subcategory Name (e.g. Clothes, Shoes)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val name = newSubcategoryName.trim()
+                        if (name.isNotBlank()) {
+                            viewModel.addCategory(
+                                name = name,
+                                type = parent.type,
+                                colorHex = parent.colorHex,
+                                parentCategoryId = parent.id
+                            )
+                            showAddSubcategoryDialog = false
+                        }
+                    }
+                ) {
+                    Text("Add")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddSubcategoryDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }

@@ -51,12 +51,20 @@ data class DashboardSummary(
     val lendingMetrics: LendingMetrics = LendingMetrics()
 )
 
+data class SubcategoryExpenseItem(
+    val subcategoryName: String,
+    val amount: Double,
+    val percentage: Float,
+    val count: Int
+)
+
 data class CategoryExpenseItem(
     val categoryName: String,
     val amount: Double,
     val percentage: Float,
     val colorHex: String,
-    val count: Int
+    val count: Int,
+    val subcategories: List<SubcategoryExpenseItem> = emptyList()
 )
 
 data class MonthlyTrendItem(
@@ -75,6 +83,39 @@ data class PersonLendingSummary(
     val outstanding: Double,
     val loansCount: Int,
     val status: LoanStatus
+)
+
+enum class BudgetStatus {
+    ON_TRACK,
+    WARNING,
+    EXCEEDED
+}
+
+data class CategoryBudgetProgress(
+    val budgetId: Long = 0,
+    val categoryId: Long,
+    val categoryName: String,
+    val subcategoryId: Long? = null,
+    val subcategoryName: String? = null,
+    val colorHex: String = "#10B981",
+    val monthYear: String,
+    val budgetedAmount: Double,
+    val actualSpent: Double,
+    val remainingAmount: Double,
+    val percentageUsed: Float,
+    val alertThresholdPercent: Int = 80,
+    val status: BudgetStatus
+)
+
+data class MonthlyBudgetOverview(
+    val monthYear: String,
+    val totalBudget: Double,
+    val totalSpent: Double,
+    val totalRemaining: Double,
+    val overallPercentage: Float,
+    val safeToSpendDaily: Double,
+    val daysRemainingInMonth: Int,
+    val categoryBreakdowns: List<CategoryBudgetProgress>
 )
 
 enum class InsightType { POSITIVE, WARNING, INFO }
@@ -425,12 +466,30 @@ object FinancialCalculationService {
             val percentage = if (totalExpense > 0) ((amount / totalExpense) * 100).toFloat() else 0f
             val color = categoryColorMap[catName.lowercase()]
                 ?: palette[Math.floorMod(catName.hashCode(), palette.size)]
+
+            // Subcategory breakdown for this category
+            val catTxs = expenseTransactions.filter { it.categoryName.equals(catName, ignoreCase = true) }
+            val subcategoryGroups = catTxs.groupBy { it.subcategoryName?.takeIf { s -> s.isNotBlank() } }
+            val subcategories = subcategoryGroups.mapNotNull { (subName, txs) ->
+                if (subName == null) null else {
+                    val subAmount = txs.sumOf { if (it.debitAmount > 0) it.debitAmount else it.amount }
+                    val subPct = if (amount > 0) ((subAmount / amount) * 100).toFloat() else 0f
+                    SubcategoryExpenseItem(
+                        subcategoryName = subName,
+                        amount = subAmount,
+                        percentage = subPct,
+                        count = txs.size
+                    )
+                }
+            }.sortedByDescending { it.amount }
+
             CategoryExpenseItem(
                 categoryName = catName,
                 amount = amount,
                 percentage = percentage,
                 colorHex = color,
-                count = categoryCounts[catName] ?: 0
+                count = categoryCounts[catName] ?: 0,
+                subcategories = subcategories
             )
         }.sortedByDescending { it.amount }
     }
@@ -469,12 +528,30 @@ object FinancialCalculationService {
             val percentage = if (totalIncome > 0) ((amount / totalIncome) * 100).toFloat() else 0f
             val color = categoryColorMap[catName.lowercase()]
                 ?: incomePalette[Math.floorMod(catName.hashCode(), incomePalette.size)]
+
+            // Subcategory breakdown for this income category
+            val catTxs = incomeTransactions.filter { it.categoryName.equals(catName, ignoreCase = true) }
+            val subcategoryGroups = catTxs.groupBy { it.subcategoryName?.takeIf { s -> s.isNotBlank() } }
+            val subcategories = subcategoryGroups.mapNotNull { (subName, txs) ->
+                if (subName == null) null else {
+                    val subAmount = txs.sumOf { if (it.creditAmount > 0) it.creditAmount else it.amount }
+                    val subPct = if (amount > 0) ((subAmount / amount) * 100).toFloat() else 0f
+                    SubcategoryExpenseItem(
+                        subcategoryName = subName,
+                        amount = subAmount,
+                        percentage = subPct,
+                        count = txs.size
+                    )
+                }
+            }.sortedByDescending { it.amount }
+
             CategoryExpenseItem(
                 categoryName = catName,
                 amount = amount,
                 percentage = percentage,
                 colorHex = color,
-                count = categoryCounts[catName] ?: 0
+                count = categoryCounts[catName] ?: 0,
+                subcategories = subcategories
             )
         }.sortedByDescending { it.amount }
     }
@@ -676,5 +753,119 @@ object FinancialCalculationService {
         val symbols = DecimalFormatSymbols(Locale.Builder().setLanguage("en").setRegion("IN").build())
         val formatter = DecimalFormat("##,##,##0.00", symbols)
         return formatter.format(amount)
+    }
+
+    fun computeMonthlyBudgetOverview(
+        monthYear: String,
+        budgets: List<BudgetEntity>,
+        transactions: List<TransactionEntity>,
+        categories: List<CategoryEntity>
+    ): MonthlyBudgetOverview {
+        val monthTxs = transactions.filter {
+            it.transactionDate.startsWith(monthYear) &&
+            it.transactionType == TransactionType.EXPENSE
+        }
+
+        val monthSpecificBudgets = budgets.filter { it.monthYear == monthYear }
+        val recurringBudgets = budgets.filter { it.monthYear == "DEFAULT" }
+
+        val activeBudgets = mutableListOf<BudgetEntity>()
+        activeBudgets.addAll(monthSpecificBudgets)
+        recurringBudgets.forEach { rec ->
+            if (activeBudgets.none { it.categoryId == rec.categoryId && it.subcategoryId == rec.subcategoryId }) {
+                activeBudgets.add(rec)
+            }
+        }
+
+        val breakdowns = mutableListOf<CategoryBudgetProgress>()
+        var totalBudget = 0.0
+        var totalSpentOnBudgeted = 0.0
+
+        activeBudgets.forEach { b ->
+            val cat = categories.firstOrNull { it.id == b.categoryId }
+            val catName = cat?.name ?: "Unknown Category"
+            val subcat = if (b.subcategoryId != null) categories.firstOrNull { it.id == b.subcategoryId } else null
+            val subcatName = subcat?.name
+
+            val spent = monthTxs.filter { tx ->
+                val matchesCat = tx.categoryId == b.categoryId || tx.categoryName.equals(catName, ignoreCase = true)
+                val matchesSub = if (b.subcategoryId != null) {
+                    tx.subcategoryId == b.subcategoryId || tx.subcategoryName.equals(subcatName, ignoreCase = true)
+                } else true
+                matchesCat && matchesSub
+            }.sumOf { if (it.debitAmount > 0) it.debitAmount else it.amount }
+
+            val remaining = b.budgetAmount - spent
+            val percentage = if (b.budgetAmount > 0.0) ((spent / b.budgetAmount) * 100).toFloat() else 0f
+            val status = when {
+                percentage >= 100f -> BudgetStatus.EXCEEDED
+                percentage >= b.alertThresholdPercent -> BudgetStatus.WARNING
+                else -> BudgetStatus.ON_TRACK
+            }
+
+            totalBudget += b.budgetAmount
+            totalSpentOnBudgeted += spent
+
+            breakdowns.add(
+                CategoryBudgetProgress(
+                    budgetId = b.id,
+                    categoryId = b.categoryId,
+                    categoryName = catName,
+                    subcategoryId = b.subcategoryId,
+                    subcategoryName = subcatName,
+                    colorHex = cat?.colorHex ?: "#10B981",
+                    monthYear = monthYear,
+                    budgetedAmount = b.budgetAmount,
+                    actualSpent = spent,
+                    remainingAmount = remaining,
+                    percentageUsed = percentage,
+                    alertThresholdPercent = b.alertThresholdPercent,
+                    status = status
+                )
+            )
+        }
+
+        val totalRemaining = totalBudget - totalSpentOnBudgeted
+        val overallPct = if (totalBudget > 0.0) ((totalSpentOnBudgeted / totalBudget) * 100).toFloat() else 0f
+        val daysRemaining = calculateDaysRemainingInMonth(monthYear)
+        val safeDaily = if (daysRemaining > 0 && totalRemaining > 0.0) totalRemaining / daysRemaining else 0.0
+
+        return MonthlyBudgetOverview(
+            monthYear = monthYear,
+            totalBudget = totalBudget,
+            totalSpent = totalSpentOnBudgeted,
+            totalRemaining = totalRemaining,
+            overallPercentage = overallPct,
+            safeToSpendDaily = safeDaily,
+            daysRemainingInMonth = daysRemaining,
+            categoryBreakdowns = breakdowns.sortedByDescending { it.percentageUsed }
+        )
+    }
+
+    fun calculateDaysRemainingInMonth(monthYear: String): Int {
+        return try {
+            val parts = monthYear.split("-")
+            val year = parts[0].toInt()
+            val month = parts[1].toInt() - 1
+            val cal = java.util.Calendar.getInstance()
+            val currentYear = cal.get(java.util.Calendar.YEAR)
+            val currentMonth = cal.get(java.util.Calendar.MONTH)
+
+            if (year == currentYear && month == currentMonth) {
+                val maxDays = cal.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
+                val currentDay = cal.get(java.util.Calendar.DAY_OF_MONTH)
+                (maxDays - currentDay + 1).coerceAtLeast(1)
+            } else if (year > currentYear || (year == currentYear && month > currentMonth)) {
+                val tempCal = java.util.Calendar.getInstance().apply {
+                    set(java.util.Calendar.YEAR, year)
+                    set(java.util.Calendar.MONTH, month)
+                }
+                tempCal.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
+            } else {
+                0
+            }
+        } catch (_: Exception) {
+            1
+        }
     }
 }

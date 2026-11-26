@@ -9,6 +9,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
@@ -299,6 +301,22 @@ fun TransactionItemCard(
                             categoryName = transaction.categoryName,
                             modifier = Modifier.weight(1f, fill = false)
                         )
+                        if (!transaction.subcategoryName.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Surface(
+                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    text = transaction.subcategoryName!!,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    maxLines = 1,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
                         val idTag = transaction.advanceId?.takeIf { it.isNotBlank() }
                             ?: transaction.referenceNumber.takeIf { it.startsWith("LEND", true) || it.startsWith("BORROW", true) || it.startsWith("ADV", true) }
                         if (!idTag.isNullOrBlank() && !displayTitle.startsWith("#")) {
@@ -842,6 +860,37 @@ fun DonutCategoryChart(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         fontSize = 11.sp
                                     )
+                                    if (catItem.subcategories.isNotEmpty()) {
+                                        Spacer(modifier = Modifier.height(3.dp))
+                                        Row(
+                                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            catItem.subcategories.take(3).forEach { sub ->
+                                                Surface(
+                                                    color = color.copy(alpha = 0.12f),
+                                                    shape = RoundedCornerShape(4.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "${sub.subcategoryName}: ${String.format(java.util.Locale.US, "%.0f", sub.percentage)}%",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        fontSize = 9.5.sp,
+                                                        color = color,
+                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                    )
+                                                }
+                                            }
+                                            if (catItem.subcategories.size > 3) {
+                                                Text(
+                                                    text = "+${catItem.subcategories.size - 3}",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontSize = 9.5.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.padding(vertical = 1.dp)
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1326,6 +1375,15 @@ fun CategoryTransactionsDialog(
     isPrivacyEnabled: Boolean = false,
     onToggleReveal: (() -> Unit)? = null
 ) {
+    var selectedSubcategoryFilter by remember { mutableStateOf<String?>(null) }
+    val uniqueSubcategories = remember(transactions) {
+        transactions.mapNotNull { it.subcategoryName?.takeIf { s -> s.isNotBlank() } }.distinct()
+    }
+    val filteredTxs = remember(transactions, selectedSubcategoryFilter) {
+        if (selectedSubcategoryFilter == null) transactions
+        else transactions.filter { it.subcategoryName.equals(selectedSubcategoryFilter, ignoreCase = true) }
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -1341,7 +1399,7 @@ fun CategoryTransactionsDialog(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "${transactions.size} transaction${if (transactions.size != 1) "s" else ""}",
+                        text = "${filteredTxs.size} transaction${if (filteredTxs.size != 1) "s" else ""}",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1366,61 +1424,96 @@ fun CategoryTransactionsDialog(
                     )
                 }
             } else {
-                androidx.compose.foundation.lazy.LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 400.dp)
-                ) {
-                    items(transactions.size) { index ->
-                        val tx = transactions[index]
-                        val isIncome = tx.transactionType == com.example.data.local.entity.TransactionType.INCOME || tx.transactionType == com.example.data.local.entity.TransactionType.REFUND
-                        val amountColor = if (isIncome) IncomeGreen else ExpenseRed
-                        val prefix = if (isIncome) "+" else "-"
-
-                        Surface(
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    if (uniqueSubcategories.isNotEmpty()) {
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 4.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable {
-                                    onDismiss()
-                                    onTransactionClick(tx)
-                                },
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                            shape = RoundedCornerShape(12.dp)
+                                .horizontalScroll(rememberScrollState())
+                                .padding(bottom = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Row(
+                            FilterChip(
+                                selected = selectedSubcategoryFilter == null,
+                                onClick = { selectedSubcategoryFilter = null },
+                                label = { Text("All (${transactions.size})") }
+                            )
+                            uniqueSubcategories.forEach { subcat ->
+                                val count = transactions.count { it.subcategoryName.equals(subcat, ignoreCase = true) }
+                                FilterChip(
+                                    selected = selectedSubcategoryFilter == subcat,
+                                    onClick = {
+                                        selectedSubcategoryFilter = if (selectedSubcategoryFilter == subcat) null else subcat
+                                    },
+                                    label = { Text("$subcat ($count)") }
+                                )
+                            }
+                        }
+                    }
+
+                    androidx.compose.foundation.lazy.LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 380.dp)
+                    ) {
+                        items(filteredTxs.size) { index ->
+                            val tx = filteredTxs[index]
+                            val isIncome = tx.transactionType == com.example.data.local.entity.TransactionType.INCOME || tx.transactionType == com.example.data.local.entity.TransactionType.REFUND
+                            val amountColor = if (isIncome) IncomeGreen else ExpenseRed
+                            val prefix = if (isIncome) "+" else "-"
+
+                            Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                    .padding(vertical = 4.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable {
+                                        onDismiss()
+                                        onTransactionClick(tx)
+                                    },
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                shape = RoundedCornerShape(12.dp)
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = tx.description.ifBlank { "Transaction" },
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = tx.description.ifBlank { "Transaction" },
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                        )
+                                        val dateAndSub = buildString {
+                                            append(tx.transactionDate)
+                                            if (!tx.subcategoryName.isNullOrBlank()) {
+                                                append(" • ")
+                                                append(tx.subcategoryName)
+                                            }
+                                        }
+                                        Text(
+                                            text = dateAndSub,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    PrivacyAmountText(
+                                        amount = if (isIncome && tx.creditAmount > 0) tx.creditAmount else if (tx.debitAmount > 0) tx.debitAmount else tx.amount,
                                         style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
-                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = tx.transactionDate,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        fontWeight = FontWeight.Bold,
+                                        color = amountColor,
+                                        prefix = prefix,
+                                        isRevealed = isRevealed,
+                                        isPrivacyEnabled = isPrivacyEnabled,
+                                        onTap = { onToggleReveal?.invoke() }
                                     )
                                 }
-                                Spacer(modifier = Modifier.width(8.dp))
-                                PrivacyAmountText(
-                                    amount = if (isIncome && tx.creditAmount > 0) tx.creditAmount else if (tx.debitAmount > 0) tx.debitAmount else tx.amount,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = amountColor,
-                                    prefix = prefix,
-                                    isRevealed = isRevealed,
-                                    isPrivacyEnabled = isPrivacyEnabled,
-                                    onTap = { onToggleReveal?.invoke() }
-                                )
                             }
                         }
                     }

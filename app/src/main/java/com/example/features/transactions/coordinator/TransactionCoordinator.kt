@@ -48,7 +48,9 @@ class TransactionCoordinator(
         categoryName: String,
         accountId: Long,
         notes: String,
-        advanceId: String? = null
+        advanceId: String? = null,
+        subcategoryId: Long? = null,
+        subcategoryName: String? = null
     ) {
         scope.launch {
             val containsCompany = description.contains("company", ignoreCase = true)
@@ -100,6 +102,8 @@ class TransactionCoordinator(
                 transactionType = finalType,
                 categoryId = finalCatId,
                 categoryName = finalCatName,
+                subcategoryId = subcategoryId,
+                subcategoryName = subcategoryName,
                 source = source,
                 notes = notes,
                 advanceId = cleanAdvanceId,
@@ -135,9 +139,18 @@ class TransactionCoordinator(
             val newDebit = if (!isCredit) amount else 0.0
 
             val oldTx = tx
+            val isParent = newCategory.parentCategoryId == null
+            val finalCatId = if (isParent) newCategory.id else (newCategory.parentCategoryId ?: newCategory.id)
+            val parentCat = if (!isParent && newCategory.parentCategoryId != null) database.categoryDao().getCategoryById(newCategory.parentCategoryId) else null
+            val finalCatName = if (isParent) newCategory.name else (parentCat?.name ?: newCategory.name)
+            val finalSubcatId = if (!isParent) newCategory.id else null
+            val finalSubcatName = if (!isParent) newCategory.name else null
+
             val updatedTx = tx.copy(
-                categoryId = newCategory.id,
-                categoryName = newCategory.name,
+                categoryId = finalCatId,
+                categoryName = finalCatName,
+                subcategoryId = finalSubcatId,
+                subcategoryName = finalSubcatName,
                 transactionType = resolvedType,
                 creditAmount = newCredit,
                 debitAmount = newDebit,
@@ -176,6 +189,20 @@ class TransactionCoordinator(
                     )
                 }
             }
+            onTransactionMutated()
+        }
+    }
+
+    fun updateTransactionSubcategory(tx: TransactionEntity, subcategory: CategoryEntity?) {
+        scope.launch {
+            val updatedTx = tx.copy(
+                subcategoryId = subcategory?.id,
+                subcategoryName = subcategory?.name,
+                updatedAt = System.currentTimeMillis()
+            )
+            repository.updateTransaction(updatedTx)
+            onTransactionMutated()
+            showMessage(if (subcategory != null) "Subcategory set to '${subcategory.name}'" else "Subcategory cleared")
         }
     }
 
@@ -276,6 +303,13 @@ class TransactionCoordinator(
 
     fun updateTransactionsCategory(txIds: List<Long>, newCategory: CategoryEntity) {
         scope.launch {
+            val isParent = newCategory.parentCategoryId == null
+            val finalCatId = if (isParent) newCategory.id else (newCategory.parentCategoryId ?: newCategory.id)
+            val parentCat = if (!isParent && newCategory.parentCategoryId != null) database.categoryDao().getCategoryById(newCategory.parentCategoryId) else null
+            val finalCatName = if (isParent) newCategory.name else (parentCat?.name ?: newCategory.name)
+            val finalSubcatId = if (!isParent) newCategory.id else null
+            val finalSubcatName = if (!isParent) newCategory.name else null
+
             val prevList = mutableListOf<TransactionEntity>()
             val newList = mutableListOf<TransactionEntity>()
             txIds.forEach { id ->
@@ -302,8 +336,10 @@ class TransactionCoordinator(
 
                     prevList.add(tx)
                     val updatedTx = tx.copy(
-                        categoryId = newCategory.id,
-                        categoryName = newCategory.name,
+                        categoryId = finalCatId,
+                        categoryName = finalCatName,
+                        subcategoryId = finalSubcatId,
+                        subcategoryName = finalSubcatName,
                         transactionType = resolvedType,
                         creditAmount = newCredit,
                         debitAmount = newDebit,
@@ -773,11 +809,14 @@ class TransactionCoordinator(
                     return@launch
                 }
                 val acc = repository.getAccountById(id)
-                val fallback = allAccs.firstOrNull { it.id != id }
-                if (acc != null && fallback != null) {
+                if (acc != null) {
                     val linkedTxs = database.transactionDao().getAllTransactionsList().filter { it.accountId == id }
-                    linkedTxs.forEach { tx ->
-                        database.transactionDao().updateTransaction(tx.copy(accountId = fallback.id, updatedAt = System.currentTimeMillis()))
+                    if (linkedTxs.isNotEmpty()) {
+                        database.transactionDao().deleteTransactions(linkedTxs.map { it.id })
+                    }
+                    val pendingTxs = database.pendingTransactionDao().getPendingTransactionsList().filter { it.accountId == id }
+                    pendingTxs.forEach { p ->
+                        database.pendingTransactionDao().delete(p.id)
                     }
                     database.statementImportDao().deleteImportsByBankName(acc.bankName)
                     if (acc.accountName.isNotBlank() && acc.accountName != acc.bankName) {
@@ -790,7 +829,7 @@ class TransactionCoordinator(
                     database.accountDao().updateAccount(remaining.first().copy(isDefault = true))
                 }
                 recalculateAllAccountBalances()
-                showMessage("Account deleted")
+                showMessage("Account and all associated details deleted")
             } catch (e: Exception) {
                 showMessage("Failed to delete account: ${e.message}")
             }

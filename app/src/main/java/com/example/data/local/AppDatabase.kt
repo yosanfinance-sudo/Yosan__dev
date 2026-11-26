@@ -26,9 +26,11 @@ import kotlinx.coroutines.launch
         SyncMetadataEntity::class,
         UndoHistoryEntity::class,
         PendingFeedbackEntity::class,
-        StatementImportEntity::class
+        StatementImportEntity::class,
+        BudgetEntity::class,
+        PendingTransactionEntity::class
     ],
-    version = 12,
+    version = 14,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -44,6 +46,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun undoDao(): UndoDao
     abstract fun pendingFeedbackDao(): PendingFeedbackDao
     abstract fun statementImportDao(): StatementImportDao
+    abstract fun budgetDao(): BudgetDao
+    abstract fun pendingTransactionDao(): PendingTransactionDao
 
     companion object {
         private val instances = java.util.concurrent.ConcurrentHashMap<String, AppDatabase>()
@@ -183,6 +187,62 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Add subcategoryId and subcategoryName to transactions
+                db.execSQL("ALTER TABLE `transactions` ADD COLUMN `subcategoryId` INTEGER DEFAULT NULL")
+                db.execSQL("ALTER TABLE `transactions` ADD COLUMN `subcategoryName` TEXT DEFAULT NULL")
+
+                // Create budgets table
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `budgets` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `categoryId` INTEGER NOT NULL,
+                        `subcategoryId` INTEGER DEFAULT NULL,
+                        `monthYear` TEXT NOT NULL,
+                        `budgetAmount` REAL NOT NULL,
+                        `alertThresholdPercent` INTEGER NOT NULL DEFAULT 80,
+                        `isRolloverEnabled` INTEGER NOT NULL DEFAULT 0,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL
+                    )
+                """.trimIndent())
+
+                // Create unique index for category, subcategory and monthYear
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_budgets_categoryId_subcategoryId_monthYear` ON `budgets` (`categoryId`, `subcategoryId`, `monthYear`)")
+            }
+        }
+
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS `pending_transactions`")
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `pending_transactions` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `amount` REAL NOT NULL,
+                        `transactionType` TEXT NOT NULL,
+                        `description` TEXT NOT NULL,
+                        `merchant` TEXT,
+                        `categoryId` INTEGER,
+                        `categoryName` TEXT NOT NULL,
+                        `subcategoryId` INTEGER,
+                        `subcategoryName` TEXT,
+                        `accountId` INTEGER NOT NULL,
+                        `accountOrCardMask` TEXT,
+                        `referenceNumber` TEXT,
+                        `runningBalance` REAL,
+                        `transactionDate` TEXT NOT NULL,
+                        `timestamp` INTEGER NOT NULL,
+                        `source` TEXT NOT NULL,
+                        `rawMessage` TEXT NOT NULL,
+                        `deduplicationKey` TEXT NOT NULL,
+                        `status` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL
+                    )
+                """.trimIndent())
+            }
+        }
+
         fun sanitizeUserKey(userKey: String?): String {
             if (userKey.isNullOrBlank()) return "guest"
             val clean = userKey.trim().lowercase()
@@ -213,7 +273,7 @@ abstract class AppDatabase : RoomDatabase() {
                 AppDatabase::class.java,
                 dbName
             )
-                .addMigrations(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
+                .addMigrations(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
                 .addCallback(AppDatabaseCallback(context.applicationContext, scope, dbName))
 
             // Only allow destructive migration in debug builds; release builds preserve data and trigger emergency backup

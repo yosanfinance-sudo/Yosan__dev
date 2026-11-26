@@ -9,6 +9,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.AppDatabase
+import com.example.data.local.DatabaseInitializer
 import com.example.data.local.entity.*
 import com.example.features.auth.data.AuthRepository
 import com.example.features.auth.GetUserProfileUseCase
@@ -671,6 +672,203 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     }.flowOn(Dispatchers.Default)
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
 
+    val allBudgets: StateFlow<List<BudgetEntity>> = repository.allBudgets
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
+
+    private val _selectedBudgetMonth = MutableStateFlow(
+        java.text.SimpleDateFormat("yyyy-MM", java.util.Locale.US).format(java.util.Date())
+    )
+    val selectedBudgetMonth: StateFlow<String> = _selectedBudgetMonth.asStateFlow()
+
+    fun setBudgetMonth(monthYear: String) {
+        _selectedBudgetMonth.value = monthYear
+    }
+
+    val monthlyBudgetOverview: StateFlow<MonthlyBudgetOverview> = combine(
+        selectedBudgetMonth,
+        allBudgets,
+        allTransactions,
+        categories
+    ) { month, budgets, txs, cats ->
+        FinancialCalculationService.computeMonthlyBudgetOverview(month, budgets, txs, cats)
+    }.flowOn(Dispatchers.Default)
+    .stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000L),
+        MonthlyBudgetOverview("", 0.0, 0.0, 0.0, 0f, 0.0, 0, emptyList())
+    )
+
+    fun setOrUpdateBudget(
+        categoryId: Long,
+        subcategoryId: Long?,
+        monthYear: String,
+        amount: Double,
+        alertThreshold: Int = 80,
+        isRollover: Boolean = false
+    ) {
+        viewModelScope.launch {
+            val existing = repository.getBudget(categoryId, subcategoryId, monthYear)
+            val budget = existing?.copy(
+                budgetAmount = amount,
+                alertThresholdPercent = alertThreshold,
+                isRolloverEnabled = isRollover,
+                updatedAt = System.currentTimeMillis()
+            ) ?: BudgetEntity(
+                categoryId = categoryId,
+                subcategoryId = subcategoryId,
+                monthYear = monthYear,
+                budgetAmount = amount,
+                alertThresholdPercent = alertThreshold,
+                isRolloverEnabled = isRollover
+            )
+            repository.insertBudget(budget)
+            showMessage("Budget saved successfully")
+        }
+    }
+
+    fun deleteBudget(id: Long) {
+        viewModelScope.launch {
+            repository.deleteBudget(id)
+            showMessage("Budget target removed")
+        }
+    }
+
+    // Two-Step Verification for Staged Financial Messages
+    val pendingTransactions: StateFlow<List<PendingTransactionEntity>> = database.pendingTransactionDao()
+        .getPendingTransactionsFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
+
+    val pendingCount: StateFlow<Int> = database.pendingTransactionDao()
+        .getPendingCountFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), 0)
+
+    fun approvePendingTransaction(
+        pending: PendingTransactionEntity,
+        accountId: Long? = null,
+        categoryId: Long? = null,
+        categoryName: String? = null,
+        subcategoryId: Long? = null,
+        subcategoryName: String? = null
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val finalAccountId = accountId ?: pending.accountId
+            val finalCatId = categoryId ?: pending.categoryId
+            val finalCatName = categoryName ?: pending.categoryName
+            val finalSubcatId = subcategoryId ?: pending.subcategoryId
+            val finalSubcatName = subcategoryName ?: pending.subcategoryName
+
+            val debit = if (pending.transactionType == TransactionType.EXPENSE) pending.amount else 0.0
+            val credit = if (pending.transactionType == TransactionType.INCOME) pending.amount else 0.0
+
+            val tx = TransactionEntity(
+                accountId = finalAccountId,
+                transactionDate = pending.transactionDate,
+                description = pending.description,
+                debitAmount = debit,
+                creditAmount = credit,
+                amount = pending.amount,
+                transactionType = pending.transactionType,
+                categoryId = finalCatId,
+                categoryName = finalCatName,
+                subcategoryId = finalSubcatId,
+                subcategoryName = finalSubcatName,
+                source = pending.source,
+                notes = if (!pending.referenceNumber.isNullOrBlank()) "Ref: ${pending.referenceNumber}" else "",
+                referenceNumber = pending.referenceNumber ?: "",
+                balanceAfterTransaction = pending.runningBalance,
+                isManual = false,
+                isCategorized = true,
+                categorizationConfidence = 1.0f
+            )
+
+            repository.insertTransaction(tx)
+            database.pendingTransactionDao().updateStatus(pending.id, PendingStatus.APPROVED)
+            showMessage("Transaction of ₹${pending.amount.toInt()} approved and added to statement")
+            companyExpenseCoordinator.scanForCompanyExpenses()
+            triggerAutoBackup()
+        }
+    }
+
+    fun dismissPendingTransaction(id: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            database.pendingTransactionDao().updateStatus(id, PendingStatus.DISMISSED)
+            showMessage("Transaction dismissed")
+        }
+    }
+
+    fun approveAllPendingTransactions(items: List<PendingTransactionEntity>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            items.forEach { pending ->
+                val debit = if (pending.transactionType == TransactionType.EXPENSE) pending.amount else 0.0
+                val credit = if (pending.transactionType == TransactionType.INCOME) pending.amount else 0.0
+
+                val tx = TransactionEntity(
+                    accountId = pending.accountId,
+                    transactionDate = pending.transactionDate,
+                    description = pending.description,
+                    debitAmount = debit,
+                    creditAmount = credit,
+                    amount = pending.amount,
+                    transactionType = pending.transactionType,
+                    categoryId = pending.categoryId,
+                    categoryName = pending.categoryName,
+                    subcategoryId = pending.subcategoryId,
+                    subcategoryName = pending.subcategoryName,
+                    source = pending.source,
+                    notes = if (!pending.referenceNumber.isNullOrBlank()) "Ref: ${pending.referenceNumber}" else "",
+                    referenceNumber = pending.referenceNumber ?: "",
+                    balanceAfterTransaction = pending.runningBalance,
+                    isManual = false,
+                    isCategorized = true,
+                    categorizationConfidence = 1.0f
+                )
+                repository.insertTransaction(tx)
+            }
+            database.pendingTransactionDao().approveAll(items.map { it.id })
+            showMessage("${items.size} transactions approved and added to statement")
+            companyExpenseCoordinator.scanForCompanyExpenses()
+            triggerAutoBackup()
+        }
+    }
+
+    fun copyBudgetsFromPreviousMonth(targetMonth: String) {
+        viewModelScope.launch {
+            try {
+                val parts = targetMonth.split("-")
+                val year = parts[0].toInt()
+                val month = parts[1].toInt()
+                val prevCal = java.util.Calendar.getInstance().apply {
+                    set(java.util.Calendar.YEAR, year)
+                    set(java.util.Calendar.MONTH, month - 2)
+                }
+                val prevMonth = java.text.SimpleDateFormat("yyyy-MM", java.util.Locale.US).format(prevCal.time)
+                val prevBudgets = repository.getBudgetsForMonthList(prevMonth)
+                if (prevBudgets.isEmpty()) {
+                    showMessage("No budget targets found in $prevMonth to copy")
+                    return@launch
+                }
+                var copiedCount = 0
+                prevBudgets.forEach { pb ->
+                    val existing = repository.getBudget(pb.categoryId, pb.subcategoryId, targetMonth)
+                    if (existing == null) {
+                        repository.insertBudget(
+                            pb.copy(
+                                id = 0,
+                                monthYear = targetMonth,
+                                createdAt = System.currentTimeMillis(),
+                                updatedAt = System.currentTimeMillis()
+                            )
+                        )
+                        copiedCount++
+                    }
+                }
+                showMessage("Copied $copiedCount budget target(s) from $prevMonth")
+            } catch (e: Exception) {
+                showMessage("Failed to copy budgets: ${e.message}")
+            }
+        }
+    }
+
     fun setMonthlyBudget(amount: Double) {
         val budgetPrefs = com.example.utils.BudgetPreferences(getApplication())
         budgetPrefs.monthlyBudget = amount
@@ -749,7 +947,8 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
                 }
                 else -> {
                     tx.categoryName.split(",")
-                        .any { it.trim().equals(params.catFilter, ignoreCase = true) }
+                        .any { it.trim().equals(params.catFilter, ignoreCase = true) } ||
+                    (!tx.subcategoryName.isNullOrBlank() && tx.subcategoryName.equals(params.catFilter, ignoreCase = true))
                 }
             }
             val matchesAcc = if (isFilteringCash) {
@@ -839,6 +1038,8 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
                         database.transactionDao().updateTransactionCategory(tx.id, result.categoryId, result.categoryName, result.transactionType)
                     }
                 }
+
+                DatabaseInitializer.seedDefaultSubcategoriesIfMissing(database)
             } catch (e: Exception) { android.util.Log.w("YosanDB", "Operation non-fatal failure", e) }
 
             companyExpenseCoordinator.scanForCompanyExpenses()
@@ -862,11 +1063,15 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     // Delegated Transactions Methods
     fun addManualTransaction(
         date: String, description: String, amount: Double, type: TransactionType,
-        categoryId: Long?, categoryName: String, accountId: Long, notes: String, advanceId: String? = null
-    ) = transactionCoordinator.addManualTransaction(date, description, amount, type, categoryId, categoryName, accountId, notes, advanceId)
+        categoryId: Long?, categoryName: String, accountId: Long, notes: String, advanceId: String? = null,
+        subcategoryId: Long? = null, subcategoryName: String? = null
+    ) = transactionCoordinator.addManualTransaction(date, description, amount, type, categoryId, categoryName, accountId, notes, advanceId, subcategoryId, subcategoryName)
 
     fun updateTransactionCategory(tx: TransactionEntity, newCategory: CategoryEntity) =
         transactionCoordinator.updateTransactionCategory(tx, newCategory)
+
+    fun updateTransactionSubcategory(tx: TransactionEntity, subcategory: CategoryEntity?) =
+        transactionCoordinator.updateTransactionSubcategory(tx, subcategory)
 
     fun updateTransactionType(tx: TransactionEntity, newType: TransactionType) =
         transactionCoordinator.updateTransactionType(tx, newType)
@@ -962,7 +1167,7 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     fun toggleRule(id: Long, isActive: Boolean) = categoryRuleCoordinator.toggleRule(id, isActive)
     fun deleteRule(id: Long) = categoryRuleCoordinator.deleteRule(id)
     fun updateRule(rule: CategorizationRuleEntity) = categoryRuleCoordinator.updateRule(rule)
-    fun addCategory(name: String, type: CategoryType, colorHex: String) = categoryRuleCoordinator.addCategory(name, type, colorHex)
+    fun addCategory(name: String, type: CategoryType, colorHex: String, parentCategoryId: Long? = null) = categoryRuleCoordinator.addCategory(name, type, colorHex, parentCategoryId)
     fun deleteCategory(id: Long) = categoryRuleCoordinator.deleteCategory(id)
     fun reassignAndDeleteCategory(id: Long, fallbackCategoryId: Long, fallbackCategoryName: String) = categoryRuleCoordinator.reassignAndDeleteCategory(id, fallbackCategoryId, fallbackCategoryName)
     fun updateCategory(category: CategoryEntity) = categoryRuleCoordinator.updateCategory(category)

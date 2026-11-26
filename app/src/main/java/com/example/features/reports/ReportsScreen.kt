@@ -236,7 +236,8 @@ fun ReportsScreen(
                             tx.categoryName.isNullOrBlank() || tx.categoryName.equals("Uncategorized", ignoreCase = true) || tx.categoryId == null
                         } else {
                             tx.categoryName.split(",")
-                                .any { it.trim().equals(selectedCategoryName, ignoreCase = true) }
+                                .any { it.trim().equals(selectedCategoryName, ignoreCase = true) } ||
+                            (!tx.subcategoryName.isNullOrBlank() && tx.subcategoryName.equals(selectedCategoryName, ignoreCase = true))
                         }
                     )
         }
@@ -1355,13 +1356,29 @@ fun ReportsScreen(
                                     }
                                 }
 
-                                categories.forEach { cat ->
+                                val sortedCategories = remember(categories) {
+                                    val roots = categories.filter { it.parentCategoryId == null }
+                                    val result = mutableListOf<CategoryEntity>()
+                                    roots.forEach { root ->
+                                        result.add(root)
+                                        val subs = categories.filter { it.parentCategoryId == root.id }
+                                        result.addAll(subs)
+                                    }
+                                    val includedIds = result.map { it.id }.toSet()
+                                    result.addAll(categories.filter { !includedIds.contains(it.id) })
+                                    result
+                                }
+
+                                sortedCategories.forEach { cat ->
+                                    val isSubcategory = cat.parentCategoryId != null
+                                    val parentName = if (isSubcategory) categories.firstOrNull { it.id == cat.parentCategoryId }?.name else null
                                     val isSelected = draftCategoryName.equals(cat.name, ignoreCase = true)
                                     Surface(
                                         color = if (isSelected) FilterSelectionBlue.copy(alpha = 0.12f) else Color.Transparent,
                                         shape = RoundedCornerShape(8.dp),
                                         modifier = Modifier
                                             .fillMaxWidth()
+                                            .padding(start = if (isSubcategory) 20.dp else 0.dp)
                                             .clip(RoundedCornerShape(8.dp))
                                             .clickable {
                                                 HapticHelper.vibrateTick(context)
@@ -1384,9 +1401,9 @@ fun ReportsScreen(
                                             )
                                             Spacer(modifier = Modifier.width(4.dp))
                                             Text(
-                                                text = cat.name,
+                                                text = if (isSubcategory) "↳ ${cat.name} (${parentName ?: "Sub"})" else cat.name,
                                                 style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                fontWeight = if (isSelected) FontWeight.Bold else (if (isSubcategory) FontWeight.Normal else FontWeight.Medium),
                                                 color = if (isSelected) FilterSelectionBlue else MaterialTheme.colorScheme.onSurface
                                             )
                                         }
